@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="styles.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ombracrypt</title>
+  <script type="module" src="/main.js" defer></script>
+</head>
+
+<body>
+  <main class="container">
+    <div class="header">
+      <h1>Ombracrypt</h1>
+      <p>The Zero-trust Quantum-safe vault</p>
+    </div>
+
+    <!-- Manual File/Folder Selection -->
+<!-- Manual File/Folder Selection -->
+      <div class="file-selection">
+        <div style="display: flex; gap: 10px; justify-content: center;">
+          <button type="button" id="encrypt-folder-btn" class="secondary-btn">Encrypt Folder</button>
+          <button type="button" id="decrypt-vault-btn" class="secondary-btn">Decrypt Vault</button>          
+        </div>
+        <p id="target-path-display">No target selected</p>
+
+        <!-- Hidden Key Selection (Only shows in Decrypt Mode) -->
+        <div id="key-selection" style="display: none; margin-top: 15px; border-top: 1px dashed #555; padding-top: 15px;">
+          <button type="button" id="select-key-btn" class="secondary-btn" style="background-color: #2d2d2d; border-color: #007acc;">Choose Key File (.obk)</button>
+          <p id="key-path-display">No key selected</p>
+        </div>
+      </div>
+      
+    <!-- Encryption Options -->
+    <div class="settings-group">
+      <div class="input-group">
+        <label for="cipher-algo">Cipher Algorithm</label>
+        <select id="cipher-algo">
+          <option value="xchacha20">XChaCha20-Poly1305</option>
+          <option value="aes256gcm">AES-256-GCM</option>
+        </select>
+      </div>
+
+      <div class="input-group">
+        <label for="kem-algo">KEM Algorithm</label>
+        <select id="kem-algo">
+          <option value="xwing">X-Wing</option>
+          <option value="cypherpunk">Cypherpunk Max</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Authentication -->
+    <form id="crypto-form">
+      <div class="input-group">        
+          <input id="main-pin" type="password" placeholder="Enter Password" required oninvalid="this.setCustomValidity('Please enter your password to proceed.')" oninput="this.setCustomValidity('')" />
+      </div>
+
+      <!-- Hidden Panic PIN -->
+      <details class="advanced-options">
+        <summary>Advanced Security Options</summary>
+        <div class="input-group advanced-group">
+          <!-- <input id="panic-pin" type="password" placeholder="Set Panic PIN (Optional)" /> -->
+          <input id="panic-pin" type="password" placeholder="Set Panic Password (Optional)" />
+          <small>If triggered during decryption, the vault key will be permanently destroyed.</small>
+        </div>
+      </details>
+
+      <button type="submit" id="action-btn">Lock Vault</button>
+    </form>
+
+    <!-- Progress Bar (Hidden by default) -->
+    <div id="progress-container" style="display: none; width: 100%; margin-top: 15px; background-color: var(--panel-bg); border-radius: 4px; border: 1px solid var(--border); overflow: hidden;">
+      <div id="progress-bar" style="width: 0%; height: 10px; background-color: var(--accent); transition: width 0.1s linear;"></div>
+    </div>
+    <p id="status-msg"></p>
+  </main>
+</body>
+
+</html>

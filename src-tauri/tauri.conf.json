@@ -1,0 +1,43 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Ombracrypt",
+  "version": "0.1.0",
+  "identifier": "com.abby.tauri-app",
+  "build": {
+    "frontendDist": "../src"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Ombracrypt",
+        "width": 800,
+        "height": 600
+      }
+    ],
+    "security": {
+      "csp": null,
+      "capabilities": [
+        {
+          "identifier": "default-capabilities",
+          "windows": ["*"],
+          "permissions": [
+            "core:default",
+            "dialog:default"
+          ]
+        }
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
