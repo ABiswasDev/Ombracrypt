@@ -17,6 +17,10 @@
 
 Ombracrypt is an network-isolated, cross-platform Post-Quantum Cryptographic (PQC) tool focused on securing digital data. It is specifically designed to defend against future quantum computing-based cyberattacks, ensuring absolute data privacy without relying on external infrastructure or cloud services. The application combines a simple, easy-to-use interface with high-performance cryptographic execution.
 
+<p align="center">
+  <img src="images/Tool_shot.png" alt="Ombracrypt Interface" width="600">
+</p>
+
 * **Cross-Platform:** Native installers generated via automated CI/CD for Linux, Windows, and macOS.
 * **Network-isolated Execution:** No telemetry, no cloud accounts, and no internet connection required.
 * **Modern Cryptography:** Utilizes NIST-standard file encryption algorithms validated through CAVP and CMVP.
