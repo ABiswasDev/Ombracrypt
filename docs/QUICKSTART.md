@@ -8,7 +8,7 @@ This guide will walk you through the fundamental steps of securing your data usi
 Launch the Ombracrypt application. Select your preferred **Cipher Algorithm** (e.g., AES-256-GCM) and **KEM Algorithm** (e.g., Cypherpunk Max) from the dropdown menus. Enter a strong, memorable master password. If your threat model requires it, you may also configure a **Panic Password** under the Advanced Security Options.
 
 <p align="center">
-  <img src="../images/enc1.png" alt="Ombracrypt Algorithm Configuration" width="600">
+  <img src="../images/enc1.png" alt="Ombracrypt Algorithm Configuration" width="450">
 </p>
 
 **Step 2: Target Selection**
@@ -22,7 +22,7 @@ Click the **Encrypt Folder** button. This will open your native system file expl
 Once selected, the application will display the target encryption path (e.g., `/Demo/vault`). Verify this path carefully to ensure you are encrypting the correct data—everything inside this selected folder will be secured. Click the **Lock Vault** button to begin. A progress bar will appear at the bottom of the interface; execution time will vary based on your payload size and the selected cryptographic algorithms.
 
 <p align="center">
-  <img src="../images/enc3.png" alt="Verifying Path and Locking Vault" width="600">
+  <img src="../images/enc3.png" alt="Verifying Path and Locking Vault" width="450">
 </p>
 
 **Step 4: Successful Completion**
