@@ -29,7 +29,7 @@ Once selected, the application will display the target encryption path (e.g., `/
 Upon completion, the progress bar will finalize, and a green success message will appear at the bottom of the application confirming: *"Operation Successful: Vault securely locked (.obv) and Quantum Key (.obk) generated."*
 
 <p align="center">
-  <img src="../images/enc4.png" alt="Encryption Successful" width="600">
+  <img src="../images/enc4.png" alt="Encryption Successful" width="450">
 </p>
 
 **Step 5: Output & Key Separation**
@@ -37,6 +37,24 @@ Open your system file explorer and navigate to the directory where your original
 
 **Crucial Security Step:** Your vault (`.obv`) is now quantum-secure and can be safely uploaded to the cloud or transmitted over untrusted networks. However, you **must** move the `.obk` key file to a physically and logically separate, highly secure location (such as an offline USB flash drive). Without *both* the `.obk` file and your master password, the vault cannot be decrypted by anyone.
 
-<p align="center">
+<div align="center">
   <img src="../images/enc5.png" alt="Generated Vault and Key Files" width="600">
-</p>
+</div>
+
+## How to Decrypt Your Data
+
+**Step 1: Selecting Your Assets**
+Launch the Ombracrypt application and select the **Decrypt Vault** option. You will need to provide both your encrypted vault file (`.obv`) and your mathematically linked Ombracrypt Quantum Key (`.obk`). 
+
+**Step 2: Path Verification**
+Check the file paths displayed in the upper section of the decryption module. Confirm that the correct `.obv` and `.obk` files are loaded before proceeding.
+
+**Step 3: Execution and Output**
+Enter your standard master password and execute the decryption. The engine will process the vault and output your fully decrypted original folder to the exact same directory where your `.obv` vault file is currently located.
+
+<div align="center">
+  <img src="../images/dec1.png" alt="Ombracrypt Decryption Interface" width="450">
+</div>
+
+> **⚠️ Critical Feature: Panic Passphrase (Duress Code)**
+> If you find yourself in a compromised physical environment where an intruder is coercing you to unlock the vault, input your pre-configured **Panic Password** instead of your master password. Activating this duress code will instantly and permanently delete the `.obk` key file from the system. Without this key, the vault becomes permanently inaccessible, successfully neutralizing the threat to your data.

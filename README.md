@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/banner.png" alt="Ombracrypt Banner" width="600">
+  <img src="images/banner.png" alt="Ombracrypt Banner" width="800">
 </p>
 
 <h1 align="center">Ombracrypt</h1>
@@ -18,7 +18,7 @@
 Ombracrypt is an network-isolated, cross-platform Post-Quantum Cryptographic (PQC) tool focused on securing digital data. It is specifically designed to defend against future quantum computing-based cyberattacks, ensuring absolute data privacy without relying on external infrastructure or cloud services. The application combines a simple, easy-to-use interface with high-performance cryptographic execution.
 
 <p align="center">
-  <img src="images/Tool_shot.png" alt="Ombracrypt Interface" width="600">
+  <img src="images/Tool_shot.png" alt="Ombracrypt Interface" width="450">
 </p>
 
 * **Cross-Platform:** Native installers generated via automated CI/CD for Linux, Windows, and macOS.
@@ -60,7 +60,7 @@ To secure your data, first organize your target files into a single directory. L
 
 To restore your files, select your `.obv` vault and `.obk` key file, input your master passphrase, and initiate the decryption process. 
 
-For detailed, visual step-by-step instructions, please read our official [User Guide](docs/USER_GUIDE.md).
+For detailed, visual step-by-step instructions for users, please read our official [Quickstart Guide](docs/QUICKSTART.md).
 
 ## Best Practices
 * **Passphrase Management:**Either completely memorize your master passphrase, or store it in a secure, offline password manager. Never store passphrases in plain text.
@@ -71,21 +71,3 @@ For detailed, visual step-by-step instructions, please read our official [User G
 ## License & Best Practices
 
 Ombracrypt is open-source and licensed under the **AGPL-3.0 License**. We welcome code reviews, audits, and contributions to ensure the highest standard of security.
-
-
-
-
-
-
-
-
-------------------
-
-# Ombracrypt
-The zero-trust quantum vault.
-
-Ombracrypt is a local, offline, quantum-resistant cryptographic engine designed to enforce absolute data sovereignty. It utilizes hybrid Post-Quantum Cryptography (PQC) encapsulation and authenticated ciphers to protect local directories from both classical and quantum attacks.
-
-## Operational Limitations (v0.2.2)
-* The engine currently evaluates archives directly in memory. 
-* Do not encrypt directories larger than your available system RAM to prevent kernel panics.
