@@ -17,7 +17,6 @@
     </div>
 
     <!-- Manual File/Folder Selection -->
-<!-- Manual File/Folder Selection -->
       <div class="file-selection">
         <div style="display: flex; gap: 10px; justify-content: center;">
           <button type="button" id="encrypt-folder-btn" class="secondary-btn">Encrypt Folder</button>
@@ -33,7 +32,7 @@
       </div>
       
     <!-- Encryption Options -->
-    <div class="settings-group">
+    <div class="settings-group" id="settings-group">
       <div class="input-group">
         <label for="cipher-algo">Cipher Algorithm</label>
         <select id="cipher-algo">
@@ -53,15 +52,27 @@
 
     <!-- Authentication -->
     <form id="crypto-form">
+      
+      <!-- Master Password -->
       <div class="input-group">        
-          <input id="main-pin" type="password" placeholder="Enter Password" required oninvalid="this.setCustomValidity('Please enter your password to proceed.')" oninput="this.setCustomValidity('')" />
+          <input id="main-pin" type="password" placeholder="Enter Master Password" required />
+          <!-- Password Strength Indicator -->
+          <div id="password-strength-container" style="display: none; height: 4px; background: #444; border-radius: 2px; margin-top: 5px;">
+             <div id="password-strength-bar" style="height: 100%; width: 0%; border-radius: 2px; transition: width 0.3s ease, background-color 0.3s ease;"></div>
+          </div>
+          <small id="password-strength-text" style="display: none; font-weight: 600;"></small>
+      </div>
+
+      <!-- Confirm Password (Only visible in Encrypt mode) -->
+      <div class="input-group" id="confirm-password-group">        
+        <input id="confirm-pin" type="password" placeholder="Confirm Master Password" required />
+        <small id="password-match-msg" style="font-weight: 600;"></small>
       </div>
 
       <!-- Hidden Panic PIN -->
-      <details class="advanced-options">
+      <details class="advanced-options" id="advanced-options">
         <summary>Advanced Security Options</summary>
         <div class="input-group advanced-group">
-          <!-- <input id="panic-pin" type="password" placeholder="Set Panic PIN (Optional)" /> -->
           <input id="panic-pin" type="password" placeholder="Set Panic Password (Optional)" />
           <small>If triggered during decryption, the vault key will be permanently destroyed.</small>
         </div>

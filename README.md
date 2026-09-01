@@ -42,7 +42,7 @@ Transparency is paramount in cryptographic tooling. Ombracrypt is strictly desig
 *   **Endpoint Compromise:** Defending against active keyloggers, memory scraping, screen-recording malware, or inherently compromised host operating systems.
 *   **Data Recovery:** Retrieving encrypted payloads if the master passphrase is forgotten or the Ombracrypt Key (`.obk`) file is permanently lost. Our zero-knowledge architecture means there are absolutely no backdoors.
 
-## Operational Limitations (v0.2.2)
+## Operational Limitations (v0.2.3)
 
 * **RAM-Bound Cryptography:** In the current build, the core engine loads and processes entire archives directly in memory. Disk-streaming for chunked encryption is not yet implemented.
 * **Maximum Payload Limit:** The size of the directory or file being encrypted must be strictly less than your system's available free RAM. Exceeding this limit will result in Out-of-Memory (OOM) exceptions and process termination.
