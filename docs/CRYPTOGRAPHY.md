@@ -145,3 +145,52 @@ The final step strips the output into two distinct files to enable air-gapped se
 To decrypt the vault, the system requires the `.obk` file, the `.obv` file, and the user's exact Master Password to perfectly reverse this synthesis flow.
 
 <p align="center"><img src="../images/pqc_crypto.png" alt="Figure 1: Post-Quantum Vault Encryption Pipeline" width="800"></p>
+
+## 6. Performance Cryptanalysis: Time Complexity and Throughput Estimation
+
+A critical metric for any cryptographic pipeline is operational latency. A system that provides quantum-grade security must still remain performant enough for daily utility. Below is the theoretical time estimation for encrypting and decrypting a 1 GiB ($1024 \text{ MiB}$) payload.
+
+### 6.1 Hardware Assumptions & Constant Variables
+The performance models assume a standard mid-tier workstation architecture:
+*   **CPU:** 6-Core processing unit (e.g., AMD Ryzen 5 class) operating at $4.0 \text{ GHz}$ with hardware-accelerated AES-NI instruction sets.
+*   **Memory:** $16 \text{ GB}$ DDR4/DDR5 RAM.
+*   **Storage:** NVMe Solid State Drive (SSD) with sequential read/write speeds of $V_{Disk} = 2000 \text{ MB/s}$.
+*   **Payload Size:** $S = 1024 \text{ MiB}$ ($1 \text{ GiB}$).
+
+### 6.2 Encryption Time Complexity ($T_{Enc}$)
+The total time to encrypt a file is the sum of four distinct operational phases: Key Derivation ($T_{KDF}$), Key Encapsulation ($T_{KEM}$), Ciphertext Processing ($T_{Cipher}$), and File I/O ($T_{IO}$).
+
+**1. Key Derivation (Argon2id)**
+To resist BHT quantum memory assaults, Argon2id is intentionally calibrated for high latency.
+$$T_{KDF} = 1.000 \text{ s}$$
+
+**2. Key Encapsulation (X-Wing)**
+Lattice-based algorithms and elliptic curves are computationally lightweight. Generating the Kyber-768/X25519 keypair and shared secret is nearly instantaneous.
+$$T_{KEM} \approx 0.002 \text{ s}$$
+
+**3. Ciphertext Processing (AES-256-GCM)**
+Utilizing AES-NI hardware acceleration, modern CPUs encrypt data at roughly $V_{AES} = 2500 \text{ MB/s}$ per core.
+$$T_{Cipher} = \frac{S}{V_{AES}} = \frac{1024}{2500} = 0.410 \text{ s}$$
+
+**4. Storage I/O (TAR Compression & Disk Write)**
+The system must read the 1 GiB file into memory, process it, and write the `.obv` ciphertext back to the SSD.
+$$T_{IO} = \frac{S_{Read}}{V_{Disk}} + \frac{S_{Write}}{V_{Disk}} = \frac{1024}{2000} + \frac{1024}{2000} = 0.512 + 0.512 = 1.024 \text{ s}$$
+
+**Total Encryption Estimation:**
+$$T_{Enc} = T_{KDF} + T_{KEM} + T_{Cipher} + T_{IO}$$
+$$T_{Enc} = 1.000 + 0.002 + 0.410 + 1.024 = \textbf{2.436 s}$$
+
+### 6.3 Decryption Time Complexity ($T_{Dec}$)
+The decryption phase mirrors the encryption pipeline structurally, substituting encapsulation for decapsulation.
+
+1.  **Key Derivation:** $T_{KDF} = 1.000 \text{ s}$ (The Argon2id hash must be re-calculated to verify the password).
+2.  **Key Decapsulation:** X-Wing decapsulation from the `.obk` file requires equivalent micro-cycles. $T_{KEM\_Dec} \approx 0.002 \text{ s}$.
+3.  **Ciphertext Processing:** AES-256-GCM decryption with hardware acceleration is fully symmetric in processing speed. $T_{Cipher} = 0.410 \text{ s}$.
+4.  **Storage I/O:** Reading the `.obv` and extracting the unencrypted `.tar` payload back to the drive. $T_{IO} = 1.024 \text{ s}$.
+
+**Total Decryption Estimation:**
+$$T_{Dec} = T_{KDF} + T_{KEM\_Dec} + T_{Cipher} + T_{IO}$$
+$$T_{Dec} = 1.000 + 0.002 + 0.410 + 1.024 = \textbf{2.436 s}$$
+
+### Conclusion
+By leveraging AES-NI hardware instructions and modern NVMe I/O speeds, the cryptographic overhead of Ombracrypt is dwarfed by standard disk read/write times. The system is theoretically capable of securing a 1 GiB payload to post-quantum standards in **under 2.5 seconds**, maintaining a frictionless user experience without compromising on maximum security parameters.
