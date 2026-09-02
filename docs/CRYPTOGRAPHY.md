@@ -59,7 +59,7 @@ This mathematical proof mandates two critical architecture decisions in Ombracry
 
 ## 4. Multi-Vector Quantum Cryptanalysis: The Baseline "Weakest Link" Architecture
 
-To rigorously validate the Ombracrypt threat model, we must subject its baseline configuration—**AES-256-GCM paired with the X-Wing KEM (Kyber-768 + X25519)**—to a theoretical full-scale quantum cryptanalysis. We assume the adversary possesses a Cryptographically Relevant Quantum Computer (CRQC) and aims to breach a vault secured by a standard 12-character alphanumeric password (entropy $K \approx 4.759 \times 10^{23}$).
+To rigorously validate the Ombracrypt threat model, we must subject its baseline configuration - **AES-256-GCM paired with the X-Wing KEM (Kyber-768 + X25519)** - to a theoretical full-scale quantum cryptanalysis. We assume the adversary possesses a Cryptographically Relevant Quantum Computer (CRQC) and aims to breach a vault secured by a standard 12-character alphanumeric password (entropy $K \approx 4.759 \times 10^{23}$).
 
 Because Ombracrypt utilizes a hybrid architecture, a complete breach requires a **two-way attack vector**: collapsing the asymmetric Key Encapsulation Mechanism (KEM) to recover the KEM Shared Secret, followed by a quantum search attack on the symmetric password bottleneck.
 
@@ -79,7 +79,7 @@ $$C_{SVP} \approx 2^{0.265b}$$
 $$C_{SVP} \approx 2^{165} \text{ quantum operations}$$
 
 Assuming a vastly powerful CRQC executing $R_Q = 10^{10}$ quantum operations per second:
-$$T_{Kyber} = \frac{2^{165}}{10^{10}} \approx 1.48 \times 10^{32} \text{ years}$$ (over 148 nonillion years — trillions of times longer than the current age of the universe)
+$$T_{Kyber} = \frac{2^{165}}{10^{10}} \approx 1.48 \times 10^{32} \text{ years}$$ (equivalent to over 148 nonillion years - trillions of times longer than the current age of the universe)
 * **Vector A Conclusion:** The ciphertext-only attack fails. To proceed, the adversary **must** physically or logically steal the `.obk` file to bypass the KEM entirely.
 
 ### Vector B: Symmetric Search Breach (Grover's Algorithm & BHT Protocol)
@@ -88,6 +88,7 @@ Assuming the adversary successfully steals both the encrypted vault (`.obv`) and
 **Phase 1: Grover's Algorithm vs. AES-256-GCM**
 Grover's algorithm reduces the effective keyspace of a symmetric cipher to its square root. For AES-256, the complexity drops from $O(2^{256})$ to $O(2^{128})$.
 $$T_{AES} = \frac{2^{128}}{10^{10}} \approx 1.07 \times 10^{21} \text{ years}$$
+(equivalent to over 1 sextillion years, which is 1 billion trillion years)
 * **Phase 1 Conclusion:** Attacking the AES payload directly remains computationally infeasible, even for a CRQC. The adversary must attack the password itself.
 
 **Phase 2: BHT Quantum Memory Assault vs. Argon2id KDF**
@@ -105,4 +106,42 @@ $$T_{Breach} = 5.418 \times 10^9 \text{ seconds}$$
 ### Final Cryptanalytic Proof
 $$5.418 \times 10^9 \text{ seconds} \approx \textbf{171.8 years}$$
 
-Even utilizing the theoretically weakest internal configuration (X-Wing + AES-256-GCM), against a state-actor equipped with a CRQC, and assuming the total physical theft of the cryptographic key file, **Ombracrypt protects a standard 12-character password from quantum brute-force compromise for over 170 years.**
+Even utilizing the theoretically weakest internal configuration (X-Wing + AES-256-GCM), against a state-actor equipped with a CRQC (Cryptographically Relevant Quantum Computer), and assuming the total physical theft of the cryptographic key file, **Ombracrypt protects a standard 12-character password from quantum brute-force compromise for over 170 years.**
+
+## 5. Cryptographic Pipeline: Key Synthesis and Vault Encapsulation
+
+The Ombracrypt architecture enforces a strict physical and cryptographic separation of the asymmetric key encapsulation from the symmetric payload. This section details the deterministic flow of entropy from user input to the final output artifacts.
+
+### Phase 1: Entropy Collection and Key Derivation (KDF)
+The pipeline initiates when the user provides the **Master Password** and selects a target file or directory. 
+1. A high-entropy, 128-bit cryptographic salt is generated via the OS-level CSPRNG.
+2. The Master Password and salt are passed into the **Argon2id** Key Derivation Function.
+3. Argon2id produces a 256-bit symmetric intermediate key, denoted as $K_{Argon}$.
+
+### Phase 2: Hybrid KEM Instantiation
+In parallel to the KDF process, the system generates the post-quantum asymmetric layer.
+1. The **X-Wing** (Kyber-768 + X25519) algorithm initializes, generating an ephemeral public/private keypair.
+2. The KEM encapsulation function runs against the public key, producing two outputs: 
+   * A 256-bit **Shared Secret** ($SS$).
+   * A **KEM Ciphertext** ($C_{KEM}$) which is required to decapsulate the secret later.
+
+### Phase 3: Master Key Synthesis
+Ombracrypt does not rely on a single point of failure. The symmetric entropy derived from the human password must be cryptographically fused with the post-quantum entropy.
+1. $K_{Argon}$ and the Shared Secret ($SS$) are routed into a Hash-based Key Derivation Function (HKDF) utilizing SHA-256.
+2. The HKDF binds both sources of entropy, yielding the final 256-bit **Master Key** ($K_{Master}$):
+$$K_{Master} = \text{HKDF}(K_{Argon} \parallel SS)$$
+
+### Phase 4: Data Encapsulation Mechanism (DEM)
+With the final $K_{Master}$ synthesized, the system processes the user's raw data.
+1. The target file or directory is compressed into a temporary `.tar` archive to strip metadata and homogenize the payload structure.
+2. An extended 24-byte nonce (for XChaCha20) or standard 12-byte nonce (for AES-256-GCM) is randomly generated.
+3. The `.tar` payload is encrypted using the chosen symmetric cipher keyed with $K_{Master}$.
+
+### Phase 5: Artifact Separation and Storage
+The final step strips the output into two distinct files to enable air-gapped security and physical key management.
+* **The Vault (`.obv`):** Contains only the symmetric ciphertext of the payload and the cipher's authentication tag. It contains zero key material.
+* **The Quantum Key (`.obk`):** Contains the KEM Ciphertext ($C_{KEM}$), the KDF Salt, the symmetric Nonce, and algorithm headers. 
+
+To decrypt the vault, the system requires the `.obk` file, the `.obv` file, and the user's exact Master Password to perfectly reverse this synthesis flow.
+
+<p align="center"><img src="../images/pqc_crypto.png" alt="Figure 1: Post-Quantum Vault Encryption Pipeline" width="800"></p>
