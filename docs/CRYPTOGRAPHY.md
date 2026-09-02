@@ -79,7 +79,7 @@ $$C_{SVP} \approx 2^{0.265b}$$
 $$C_{SVP} \approx 2^{165} \text{ quantum operations}$$
 
 Assuming a vastly powerful CRQC executing $R_Q = 10^{10}$ quantum operations per second:
-$$T_{Kyber} = \frac{2^{165}}{10^{10}} \approx 1.48 \times 10^{32} \text{ years}$$
+$$T_{Kyber} = \frac{2^{165}}{10^{10}} \approx 1.48 \times 10^{32} \text{ years}$$ (over 148 nonillion years — trillions of times longer than the current age of the universe)
 * **Vector A Conclusion:** The ciphertext-only attack fails. To proceed, the adversary **must** physically or logically steal the `.obk` file to bypass the KEM entirely.
 
 ### Vector B: Symmetric Search Breach (Grover's Algorithm & BHT Protocol)
