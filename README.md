@@ -67,6 +67,9 @@ For detailed, visual step-by-step instructions for users, please read our offici
 * **Separation of Assets:** Always store your Ombracrypt Key (`.obk`) in a physically and logically separate location from your encrypted Ombracrypt Vault (`.obv`) to prevent a single-point-of-failure compromise.
 * **Data Verification:** Verify that the encryption process completed successfully and that you can decrypt the vault before permanently deleting or wiping the original, unencrypted source files.
 
+## License
+Ombracrypt is open-source and licensed under the **AGPL-3.0 License**. We welcome code reviews, audits, and contributions to ensure the highest standard of security.
+
 ## Developer Guide: Building from Source
 
 Ombracrypt utilizes a Tauri architecture, bridging a lightweight web frontend with a high-performance Rust cryptographic core. If you wish to audit the code, contribute, or compile the application locally, follow these steps.
@@ -106,8 +109,3 @@ To build the optimized release binaries for your current operating system, run:
 `npm run tauri build`
 
 The compiled installation files will be generated inside the `src-tauri/target/release/bundle/` directory.
-
----
-
-## License
-Ombracrypt is open-source and licensed under the **AGPL-3.0 License**. We welcome code reviews, audits, and contributions to ensure the highest standard of security.
