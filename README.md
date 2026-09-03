@@ -107,6 +107,7 @@ To build the optimized release binaries for your current operating system, run:
 
 The compiled installation files will be generated inside the `src-tauri/target/release/bundle/` directory.
 
-## License
+---
 
+## License
 Ombracrypt is open-source and licensed under the **AGPL-3.0 License**. We welcome code reviews, audits, and contributions to ensure the highest standard of security.
