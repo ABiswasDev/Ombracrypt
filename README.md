@@ -67,6 +67,45 @@ For detailed, visual step-by-step instructions for users, please read our offici
 * **Separation of Assets:** Always store your Ombracrypt Key (`.obk`) in a physically and logically separate location from your encrypted Ombracrypt Vault (`.obv`) to prevent a single-point-of-failure compromise.
 * **Data Verification:** Verify that the encryption process completed successfully and that you can decrypt the vault before permanently deleting or wiping the original, unencrypted source files.
 
+## Developer Guide: Building from Source
+
+Ombracrypt utilizes a Tauri architecture, bridging a lightweight web frontend with a high-performance Rust cryptographic core. If you wish to audit the code, contribute, or compile the application locally, follow these steps.
+
+**1. Prerequisites**
+Ensure your development environment has the following core tools installed:
+*   [Git](https://git-scm.com/)
+*   [Node.js](https://nodejs.org/) (v18 or higher)
+*   [Rust & Cargo](https://rustup.rs/) (latest stable toolchain)
+
+**Platform-Specific Dependencies:**
+*   **Windows:** You must install the [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/). During the installer setup, ensure the **"Desktop development with C++"** workload is selected. *(Note: Windows 10 users may also need to install the WebView2 runtime; it is pre-installed on Windows 11).*
+*   **macOS:** You must install the Xcode Command Line Tools to compile the C and Rust dependencies. Open your terminal and run:
+    ```bash
+    xcode-select --install
+    ```
+*   **Linux (Debian/Ubuntu/Mint):** You must install the WebKit and GTK packages required by Tauri. Open your terminal and run:
+    ```bash
+    sudo apt update
+    sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+    ```
+
+**2. Local Setup & Execution**
+```bash
+# Clone the repository
+git clone [https://github.com/ABiswasDev/Ombracrypt.git](https://github.com/ABiswasDev/Ombracrypt.git)
+cd Ombracrypt
+
+# Install frontend dependencies
+npm install
+
+# Launch the application in development mode (with hot-reloading)
+npm run tauri dev
+
+**3. Building for Production**
+To build the optimized release binaries for your current operating system, run:
+`npm run tauri build`
+
+The compiled installation files will be generated inside the `src-tauri/target/release/bundle/` directory.
 
 ## License & Best Practices
 
