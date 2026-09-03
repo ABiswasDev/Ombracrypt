@@ -146,51 +146,26 @@ To decrypt the vault, the system requires the `.obk` file, the `.obv` file, and 
 
 <p align="center"><img src="../images/pqc_crypto.png" alt="Figure 1: Post-Quantum Vault Encryption Pipeline" width="800"></p>
 
-## 6. Performance Cryptanalysis: Time Complexity and Throughput Estimation
+## 6. Implemented Cryptographic Primitives
 
-A critical metric for any cryptographic pipeline is operational latency. A system that provides quantum-grade security must still remain performant enough for daily utility. Below is the theoretical time estimation for encrypting and decrypting a 1 GiB ($1024 \text{ MiB}$) payload.
+Ombracrypt relies exclusively on peer-reviewed, standard-compliant algorithms. The architecture divides these primitives into asymmetric encapsulation for securing the keys and symmetric encapsulation for the data payload.
 
-### 6.1 Hardware Assumptions & Constant Variables
-The performance models assume a standard mid-tier workstation architecture:
-*   **CPU:** 6-Core processing unit (e.g., AMD Ryzen 5 class) operating at $4.0 \text{ GHz}$ with hardware-accelerated AES-NI instruction sets.
-*   **Memory:** $16 \text{ GB}$ DDR4/DDR5 RAM.
-*   **Storage:** NVMe Solid State Drive (SSD) with sequential read/write speeds of $V_{Disk} = 2000 \text{ MB/s}$.
-*   **Payload Size:** $S = 1024 \text{ MiB}$ ($1 \text{ GiB}$).
+### 6.1 Asymmetric Key Encapsulation Mechanisms (KEMs)
+These algorithms are responsible for safely generating and wrapping the Shared Secret ($SS$) used to synthesize the Master Key.
 
-### 6.2 Encryption Time Complexity ($T_{Enc}$)
-The total time to encrypt a file is the sum of four distinct operational phases: Key Derivation ($T_{KDF}$), Key Encapsulation ($T_{KEM}$), Ciphertext Processing ($T_{Cipher}$), and File I/O ($T_{IO}$).
+*   **X-Wing (Hybrid KEM):** 
+    *   *Development:* Introduced in early 2024 as an Internet-Draft standard.
+    *   *Purpose:* A conservative hybrid approach that fuses a classical elliptic curve (X25519, developed in 2006) with a post-quantum lattice algorithm (ML-KEM-768/Kyber, standardized by NIST in 2024). It serves as the baseline, ensuring that even if the new quantum-resistant mathematics are broken, the encryption falls back to classical curve security.
+*   **"Cyberpunk Max" (High-Security Profile):**
+    *   *Development:* A bespoke configuration scaling to the maximum available parameter sets (e.g., ML-KEM-1024).
+    *   *Purpose:* Designed for extreme threat models and state-actor evasion. This profile trades a marginal amount of processing latency for the largest possible lattice bounds and cryptographic margins, ensuring long-term resilience against sophisticated cryptanalytic breakthroughs.
 
-**1. Key Derivation (Argon2id)**
-To resist BHT quantum memory assaults, Argon2id is intentionally calibrated for high latency.
-$$T_{KDF} = 1.000 \text{ s}$$
+### 6.2 Symmetric Data Encapsulation Mechanisms (DEMs)
+These ciphers handle the actual payload encryption. Both utilize Authenticated Encryption with Associated Data (AEAD) to ensure the vault cannot be tampered with.
 
-**2. Key Encapsulation (X-Wing)**
-Lattice-based algorithms and elliptic curves are computationally lightweight. Generating the Kyber-768/X25519 keypair and shared secret is nearly instantaneous.
-$$T_{KEM} \approx 0.002 \text{ s}$$
-
-**3. Ciphertext Processing (AES-256-GCM)**
-Utilizing AES-NI hardware acceleration, modern CPUs encrypt data at roughly $V_{AES} = 2500 \text{ MB/s}$ per core.
-$$T_{Cipher} = \frac{S}{V_{AES}} = \frac{1024}{2500} = 0.410 \text{ s}$$
-
-**4. Storage I/O (TAR Compression & Disk Write)**
-The system must read the 1 GiB file into memory, process it, and write the `.obv` ciphertext back to the SSD.
-$$T_{IO} = \frac{S_{Read}}{V_{Disk}} + \frac{S_{Write}}{V_{Disk}} = \frac{1024}{2000} + \frac{1024}{2000} = 0.512 + 0.512 = 1.024 \text{ s}$$
-
-**Total Encryption Estimation:**
-$$T_{Enc} = T_{KDF} + T_{KEM} + T_{Cipher} + T_{IO}$$
-$$T_{Enc} = 1.000 + 0.002 + 0.410 + 1.024 = \textbf{2.436 s}$$
-
-### 6.3 Decryption Time Complexity ($T_{Dec}$)
-The decryption phase mirrors the encryption pipeline structurally, substituting encapsulation for decapsulation.
-
-1.  **Key Derivation:** $T_{KDF} = 1.000 \text{ s}$ (The Argon2id hash must be re-calculated to verify the password).
-2.  **Key Decapsulation:** X-Wing decapsulation from the `.obk` file requires equivalent micro-cycles. $T_{KEM\_Dec} \approx 0.002 \text{ s}$.
-3.  **Ciphertext Processing:** AES-256-GCM decryption with hardware acceleration is fully symmetric in processing speed. $T_{Cipher} = 0.410 \text{ s}$.
-4.  **Storage I/O:** Reading the `.obv` and extracting the unencrypted `.tar` payload back to the drive. $T_{IO} = 1.024 \text{ s}$.
-
-**Total Decryption Estimation:**
-$$T_{Dec} = T_{KDF} + T_{KEM\_Dec} + T_{Cipher} + T_{IO}$$
-$$T_{Dec} = 1.000 + 0.002 + 0.410 + 1.024 = \textbf{2.436 s}$$
-
-### Conclusion
-By leveraging AES-NI hardware instructions and modern NVMe I/O speeds, the cryptographic overhead of Ombracrypt is dwarfed by standard disk read/write times. The system is theoretically capable of securing a 1 GiB payload to post-quantum standards in **under 2.5 seconds**, maintaining a frictionless user experience without compromising on maximum security parameters.
+*   **AES-256-GCM:** 
+    *   *Development:* AES was established by NIST in 2001 (originating as the Rijndael cipher in 1998). The Galois/Counter Mode (GCM) was standardized in 2007.
+    *   *Purpose:* The de facto global standard for block ciphers. It benefits heavily from CPU hardware acceleration (AES-NI), making it the optimal choice for high-speed, large-file encryption on modern desktop processors.
+*   **XChaCha20-Poly1305:** 
+    *   *Development:* Evolved from the ChaCha20 cipher designed by Daniel J. Bernstein in 2008, extended to the "X" variant with a larger nonce in 2018. 
+    *   *Purpose:* A highly resilient stream cipher that does not rely on hardware acceleration. Its primary advantage is its massive 192-bit extended nonce, which completely neutralizes the risk of random nonce collisions when encrypting massive datasets, while also providing inherent immunity to cache-timing attacks.
