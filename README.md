@@ -95,7 +95,7 @@ Ensure your development environment has the following core tools installed:
 **2. Local Setup & Execution**
 ```bash
 # Clone the repository
-git clone [https://github.com/ABiswasDev/Ombracrypt.git](https://github.com/ABiswasDev/Ombracrypt.git)
+git clone https://github.com/ABiswasDev/Ombracrypt.git
 cd Ombracrypt
 
 # Install frontend dependencies
