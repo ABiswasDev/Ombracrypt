@@ -1,11 +1,11 @@
 :root {
-  --bg-color: #1e1e1e;
-  --panel-bg: #2d2d2d;
+  --bg-color: #000000;
+  --panel-bg: #0a0a0a;
   --text-primary: #ffffff;
   --text-secondary: #a0a0a0;
   --accent: #007acc;
   --accent-hover: #005f9e;
-  --border: #444444;
+  --border: #222222;
   --border-focus: #007acc;
 }
 
@@ -55,9 +55,9 @@ body {
 
 .secondary-btn {
   width: 100%;
-  background-color: #444444;
+  background-color: #222222;
   color: white;
-  border: 1px solid #555555;
+  border: 1px solid #444444;
   padding: 10px 15px;
   border-radius: 4px;
   cursor: pointer;
@@ -66,7 +66,7 @@ body {
 }
 
 .secondary-btn:hover {
-  background-color: #555555;
+  background-color: #333333;
 }
 
 #target-path-display {
@@ -138,6 +138,7 @@ select:focus, input:focus {
 
 /* Advanced Options Accordion */
 .advanced-options {
+  margin-top: 15px;
   margin-bottom: 20px;
 }
 
@@ -190,4 +191,17 @@ small {
   font-size: 0.85rem;
   margin-top: 15px;
   min-height: 20px;
+}
+
+/* --- New Neon Glowing Classes --- */
+.neon-green-text {
+  color: #39ff14 !important;
+  text-shadow: 0 0 4px rgba(57, 255, 20, 0.6), 0 0 8px rgba(57, 255, 20, 0.4);
+  font-weight: 500;
+}
+
+.glow-title {
+  color: #00e5ff !important;
+  text-shadow: 0 0 8px rgba(0, 229, 255, 0.7), 0 0 16px rgba(0, 229, 255, 0.4);
+  letter-spacing: 1px;
 }

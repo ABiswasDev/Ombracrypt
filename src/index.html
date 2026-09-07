@@ -12,7 +12,7 @@
 <body>
   <main class="container">
     <div class="header">
-      <h1>Ombracrypt</h1>
+      <h1 class="glow-title">Ombracrypt</h1>
       <p>The Zero-trust Quantum-safe vault</p>
     </div>
 
@@ -34,7 +34,7 @@
     <!-- Encryption Options -->
     <div class="settings-group" id="settings-group">
       <div class="input-group">
-        <label for="cipher-algo">Cipher Algorithm</label>
+        <label for="cipher-algo" class="neon-green-text">Cipher Algorithm</label>
         <select id="cipher-algo">
           <option value="xchacha20">XChaCha20-Poly1305</option>
           <option value="aes256gcm">AES-256-GCM</option>
@@ -42,7 +42,7 @@
       </div>
 
       <div class="input-group">
-        <label for="kem-algo">KEM Algorithm</label>
+        <label for="kem-algo" class="neon-green-text">KEM Algorithm</label>
         <select id="kem-algo">
           <option value="xwing">X-Wing</option>
           <option value="cypherpunk">Cypherpunk Max</option>
@@ -71,10 +71,10 @@
 
       <!-- Hidden Panic PIN -->
       <details class="advanced-options" id="advanced-options">
-        <summary>Advanced Security Options</summary>
+        <summary class="neon-green-text">Advanced Security Options</summary>
         <div class="input-group advanced-group">
-          <input id="panic-pin" type="password" placeholder="Set Panic Password (Optional)" />
-          <small>If triggered during decryption, the vault key will be permanently destroyed.</small>
+          <input id="panic-pin" type="password" placeholder="Set Deception Passcode (Optional)" />
+          <small class="neon-green-text">Deploys deception protocol upon unauthorized access.</small>
         </div>
       </details>
 
@@ -82,8 +82,16 @@
     </form>
 
     <!-- Progress Bar (Hidden by default) -->
-    <div id="progress-container" style="display: none; width: 100%; margin-top: 15px; background-color: var(--panel-bg); border-radius: 4px; border: 1px solid var(--border); overflow: hidden;">
-      <div id="progress-bar" style="width: 0%; height: 10px; background-color: var(--accent); transition: width 0.1s linear;"></div>
+    <div id="progress-container" style="display: none; width: 100%; margin-top: 15px;">
+      <!-- New Stats Row -->
+      <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 5px; color: var(--text-secondary);">
+        <span id="progress-percent">0%</span>
+        <span id="progress-eta">Calculating ETA...</span>
+      </div>
+      <!-- Existing Bar -->
+      <div style="background-color: var(--panel-bg); border-radius: 4px; border: 1px solid var(--border); overflow: hidden;">
+        <div id="progress-bar" style="width: 0%; height: 10px; background-color: var(--accent); transition: width 0.1s linear;"></div>
+      </div>
     </div>
     <p id="status-msg"></p>
   </main>
