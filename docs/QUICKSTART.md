@@ -54,11 +54,11 @@ Enter your standard master password and execute the decryption. The engine will 
 
 > **⚠️ Critical Feature: Deception Passcode (Duress Code)**
 >
-> The Deception Passcode is a specialized anti-forensic failsafe designed for extreme threat models, specifically for situations where you are under physical coercion and being forced to unlock your vault. Because this mechanism is destructive, it is vital to understand exactly how it operates:
+> The Deception Passcode is a specialized cryptographic zeroization failsafe designed for extreme threat models, specifically for situations where you are under physical coercion and being forced to unlock your vault. Because this mechanism is destructive, it is vital to understand exactly how it operates:
 >
 > * **The Scenario:** If a hostile actor forces you to decrypt your data, you will launch the Ombracrypt decryption interface exactly as you normally would.
 > * **The Action:** When prompted for your credentials, you will input your pre-configured **Deception Passcode** *instead* of your actual Master Password.
-> * **The Execution:** The application will silently accept the passcode without throwing an error or alerting the intruder. However, instead of decrypting the payload, the engine will instantly and permanently wipe the `.obk` (Quantum Key) file from your local hardware.
-> * **The Result:** Because Ombracrypt utilizes a split-key architecture, the destruction of the `.obk` file instantly breaks the cryptographic chain. The `.obv` (Encrypted Vault) file becomes permanently mathematically inaccessible to everyone—including you and the attacker.
+> * **The Execution:** The application will intentionally throw a "password mismatch" error to deceive the intruder into thinking a simple typo occurred. Simultaneously in the background, the engine will instantly tamper with the `.obk` (Quantum Key) file. It permanently scrambles the internal cryptographic key material while leaving the file's external metadata and structure completely intact.
+> * **The Result:** Because Ombracrypt utilizes a split-key architecture, the zeroization of the `.obk` payload instantly breaks the cryptographic chain. To the attacker, the key file still appears to be physically present, but the `.obv` (Encrypted Vault) file is now permanently mathematically inaccessible to everyone—including you and the attacker.
 > 
-> **Important:** This action is strictly irreversible. Activating the Deception Passcode permanently neutralizes the threat by destroying the keys to your data, so it should only be triggered in absolute emergencies.
+> **Important:** This action is strictly irreversible. Activating the Deception Passcode permanently neutralizes the threat by destroying the internal keys to your data, so it should only be triggered in absolute emergencies.
