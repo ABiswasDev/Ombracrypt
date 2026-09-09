@@ -117,6 +117,7 @@ The pipeline initiates when the user provides the **Master Password** and select
 1. A high-entropy, 128-bit cryptographic salt is generated via the OS-level CSPRNG.
 2. The Master Password and salt are passed into the **Argon2id** Key Derivation Function.
 3. Argon2id produces a 256-bit symmetric intermediate key, denoted as $K_{Argon}$.
+4. *(Optional)* If the user provides a **Deception Passcode**, it is independently hashed via Argon2id to create a secondary honeypot verification hash.
 
 ### Phase 2: Hybrid KEM Instantiation
 In parallel to the KDF process, the system generates the post-quantum asymmetric layer.
@@ -132,15 +133,15 @@ Ombracrypt does not rely on a single point of failure. The symmetric entropy der
 $$K_{Master} = \text{HKDF}(K_{Argon} \parallel SS)$$
 
 ### Phase 4: Data Encapsulation Mechanism (DEM)
-With the final $K_{Master}$ synthesized, the system processes the user's raw data.
-1. The target file or directory is compressed into a temporary `.tar` archive to strip metadata and homogenize the payload structure.
+With the final $K_{Master}$ synthesized, the system processes the user's raw data utilizing a memory-safe streaming architecture.
+1. The target file or directory is dynamically archived into a `.tar` stream and sliced into strict **1MB chunks** to prevent RAM exhaustion on massive payloads.
 2. An extended 24-byte nonce (for XChaCha20) or standard 12-byte nonce (for AES-256-GCM) is randomly generated.
-3. The `.tar` payload is encrypted using the chosen symmetric cipher keyed with $K_{Master}$.
+3. The 1MB chunked `.tar` payload is encrypted using the chosen symmetric cipher keyed with $K_{Master}$.
 
 ### Phase 5: Artifact Separation and Storage
 The final step strips the output into two distinct files to enable air-gapped security and physical key management.
 * **The Vault (`.obv`):** Contains only the symmetric ciphertext of the payload and the cipher's authentication tag. It contains zero key material.
-* **The Quantum Key (`.obk`):** Contains the KEM Ciphertext ($C_{KEM}$), the KDF Salt, the symmetric Nonce, and algorithm headers. 
+* **The Quantum Key (`.obk`):** Contains the KEM Ciphertext ($C_{KEM}$), the KDF Salt, the symmetric Nonce, algorithm headers, and the Deception Hash (if the honeypot was activated). 
 
 To decrypt the vault, the system requires the `.obk` file, the `.obv` file, and the user's exact Master Password to perfectly reverse this synthesis flow.
 
@@ -156,7 +157,7 @@ These algorithms are responsible for safely generating and wrapping the Shared S
 *   **X-Wing (Hybrid KEM):** 
     *   *Development:* Introduced in early 2024 as an Internet-Draft standard.
     *   *Purpose:* A conservative hybrid approach that fuses a classical elliptic curve (X25519, developed in 2006) with a post-quantum lattice algorithm (ML-KEM-768/Kyber, standardized by NIST in 2024). It serves as the baseline, ensuring that even if the new quantum-resistant mathematics are broken, the encryption falls back to classical curve security.
-*   **"Cyberpunk Max" (High-Security Profile):**
+*   **"Cypherpunk Max" (High-Security Profile):**
     *   *Development:* A bespoke configuration scaling to the maximum available parameter sets (e.g., ML-KEM-1024).
     *   *Purpose:* Designed for extreme threat models and state-actor evasion. This profile trades a marginal amount of processing latency for the largest possible lattice bounds and cryptographic margins, ensuring long-term resilience against sophisticated cryptanalytic breakthroughs.
 

@@ -15,7 +15,7 @@
 
 ### Overview & Features
 
-Ombracrypt is an network-isolated, cross-platform Post-Quantum Cryptographic (PQC) tool focused on securing digital data. It is specifically designed to defend against future quantum computing-based cyberattacks, ensuring absolute data privacy without relying on external infrastructure or cloud services. The application combines a simple, easy-to-use interface with high-performance cryptographic execution.
+Ombracrypt is a network-isolated, cross-platform Post-Quantum Cryptographic (PQC) file encryption utility dedicated to securing digital assets. It is explicitly designed to defend against future quantum computing-based cyberattacks, ensuring absolute data privacy without relying on external infrastructure or cloud services. The application combines an intuitive interface with a high-performance cryptographic engine.
 
 <p align="center">
   <img src="images/Tool_shot.png" alt="Ombracrypt Interface" width="450">
@@ -35,17 +35,20 @@ Transparency is paramount in cryptographic tooling. Ombracrypt is strictly desig
 *   **Cryptographic Agility:** Offering a modular selection of symmetric ciphers and Key Encapsulation Mechanisms (KEMs), empowering users to calibrate the trade-off between cryptographic strength and processing overhead.
 *   **Secure Bundling:** Consolidating multiple heterogeneous files into a single encrypted `.obv` vault for streamlined, organized data management.
 *   **Physical & Local Security:** Mitigating unauthorized local access and protecting payloads against the physical theft of offline storage devices.
-*   **Supply Chain Integrity:** Ensuring transparent, verifiable release binaries through automated GitHub Actions CI/CD pipelines.
-* **Anti-Coercion (Panic Passphrase):** Mitigating physical duress (rubber-hose cryptanalysis) by allowing users to input a specialized password that instantly and securely erases the Ombracrypt Key (`.obk`) file, rendering the vault permanently inaccessible.
+*   **Supply Chain Integrity:** Ensuring transparent, verifiable release binaries through automated GitHub Actions CI/CD 
+* **Anti-Coercion (Deception Passcode):** Mitigating physical duress via a secondary passcode that mimics a successful unlock, but silently destroys the Ombracrypt Key (\.obk`) to ensure plausible deniability.`
 
 **Out of Scope:**
 *   **Endpoint Compromise:** Defending against active keyloggers, memory scraping, screen-recording malware, or inherently compromised host operating systems.
 *   **Data Recovery:** Retrieving encrypted payloads if the master passphrase is forgotten or the Ombracrypt Key (`.obk`) file is permanently lost. Our zero-knowledge architecture means there are absolutely no backdoors.
 
-## Operational Limitations (v0.3.3)
+## Core Architecture and Cryptanalysis (v0.3.3)
 
-* **RAM-Bound Cryptography:** In the current build, the core engine loads and processes entire archives directly in memory. Disk-streaming for chunked encryption is not yet implemented.
-* **Maximum Payload Limit:** The size of the directory or file being encrypted must be strictly less than your system's available free RAM. Exceeding this limit will result in Out-of-Memory (OOM) exceptions and process termination.
+* **Chunked Streaming Engine:** Ombracrypt utilizes a strict 1MB chunked streaming architecture, enabling the encryption of massive payloads while maintaining a near-zero RAM footprint.
+* **Hardware-Level Failsafes:** Engineered with strict OS-level error trapping, the engine intercepts hardware limitations (such as disk storage exhaustion) and executes secure cleanup protocols to prevent data corruption.
+* **100% Edge-Case Validated:** The processing pipeline is natively designed to handle structural anomalies, including zero-byte directories and strict filesystem permission walls.
+
+For a detailed understanding of the application's underlying engineering, please read the [Architecture Document](https://github.com/ABiswasDev/Ombracrypt/blob/main/docs/ARCHITECTURE.md) and for a full cryptanalysis, refer to the [PQC Cryptography Document](https://github.com/ABiswasDev/Ombracrypt/blob/main/docs/CRYPTOGRAPHY.md)
 
 ## Installation & Usage
 
@@ -56,11 +59,11 @@ Download the latest stable release from our [Releases Page](https://github.com/A
 * **Windows:** Download and run the `.exe` or `.msi` setup file.
 * **macOS:** Mount the `.dmg` image or extract the `.app.tar.gz` archive.
 
-To secure your data, first organize your target files into a single directory. Launch Ombracrypt, select this directory via the interface, choose your preferred cryptographic algorithms, and set a strong passphrase. The engine will process the folder and output a Quantum-Safe Vault (`.obv`) and a corresponding Ombracrypt Key (`.obk`). 
+To secure your data, first organize your target files into a single directory. Launch Ombracrypt, select this directory via the interface, choose your preferred cryptographic algorithms, and set a strong Master Password (and an optional Deception Passcode). The engine will process the folder and output a Quantum-Safe Vault (.obv) and a corresponding Ombracrypt Key (.obk).
 
 To restore your files, select your `.obv` vault and `.obk` key file, input your master passphrase, and initiate the decryption process. 
 
-For detailed, visual step-by-step instructions for users, please read our official [Quickstart Guide](docs/QUICKSTART.md).
+For detailed, visual step-by-step instructions for users, please read our official Tutorial or [Quickstart Guide](docs/QUICKSTART.md).
 
 ## Best Practices
 * **Passphrase Management:**Either completely memorize your master passphrase, or store it in a secure, offline password manager. Never store passphrases in plain text.
