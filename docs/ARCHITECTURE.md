@@ -17,7 +17,7 @@ Communication between the frontend and the backend is exclusively routed through
 * The moment the Rust core receives the command, the frontend discards the sensitive inputs from its state. The Rust core performs the heavy lifting and returns only safe execution statuses (e.g., success metrics, chunk progression, or intercepted OS-level errors) back to the UI.
 
 <p align="center">
-  <img src="../images/arch1.png" alt="Ombracrypt System Architecture Diagram" width="800">
+  <img src="/images/arch1.png" alt="Ombracrypt System Architecture Diagram" width="800">
 </p>
 
 ## 2. Memory-Safe Streaming Pipeline (v0.3.3)
