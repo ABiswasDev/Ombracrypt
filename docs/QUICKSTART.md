@@ -12,14 +12,14 @@ Launch the Ombracrypt application. Select your preferred **Cipher Algorithm** (e
 </p>
 
 **Step 2: Target Selection**
-Click the **Encrypt Folder** button. This will open your native system file explorer. Navigate to and select the specific directory containing the data you wish to encrypt. In this example, we are selecting a directory named `vault` located inside a `Demo` folder.
+Click the **Encrypt Folder** button. This will open your native system file explorer. Navigate to and select the specific directory containing the data you wish to encrypt. In this example, we are selecting a directory named `My Data` located on an external drive.
 
 <p align="center">
   <img src="../images/enc2.png" alt="Selecting the Target Directory" width="600">
 </p>
 
 **Step 3: Path Verification & Execution**
-Once selected, the application will display the target encryption path (e.g., `/Demo/vault`). Verify this path carefully to ensure you are encrypting the correct data—everything inside this selected folder will be secured. Click the **Lock Vault** button to begin. A progress bar will appear at the bottom of the interface; execution time will vary based on your payload size and the selected cryptographic algorithms.
+the application will display the target encryption path (e.g., `/media/abby/E8DF-98B9/My data`). Verify this path carefully to ensure you are encrypting the correct data—everything inside this selected folder will be secured. Click the **Lock Vault** button to begin. A progress bar will appear at the bottom of the interface; execution time will vary based on your payload size and the selected cryptographic algorithms.
 
 <p align="center">
   <img src="../images/enc3.png" alt="Verifying Path and Locking Vault" width="450">
@@ -33,7 +33,7 @@ Upon completion, the progress bar will finalize, and a green success message wil
 </p>
 
 **Step 5: Output & Key Separation**
-Open your system file explorer and navigate to the directory where your original folder was located. You will now see two newly generated files: your encrypted vault (`vault.obv`) and your cryptographic key (`vault.obk`). 
+Open your system file explorer and navigate to the directory where your original folder was located. You will now see two newly generated files: your encrypted vault (`My data.obv`) and your cryptographic key (`My data.obk`). 
 
 **Crucial Security Step:** Your vault (`.obv`) is now quantum-secure and can be safely uploaded to the cloud or transmitted over untrusted networks. However, you **must** move the `.obk` key file to a physically and logically separate, highly secure location (such as an offline USB flash drive). Without *both* the `.obk` file and your master password, the vault cannot be decrypted by anyone.
 
