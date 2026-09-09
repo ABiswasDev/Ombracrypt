@@ -5,7 +5,7 @@ This guide will walk you through the fundamental steps of securing your data usi
 ## How to Encrypt Your Data
 
 **Step 1: Algorithm & Password Configuration**
-Launch the Ombracrypt application. Select your preferred **Cipher Algorithm** (e.g., AES-256-GCM) and **KEM Algorithm** (e.g., Cypherpunk Max) from the dropdown menus. Enter a strong, memorable master password. If your threat model requires it, you may also configure a **Panic Password** under the Advanced Security Options.
+Launch the Ombracrypt application. Select your preferred **Cipher Algorithm** (e.g., AES-256-GCM) and **KEM Algorithm** (e.g., Cypherpunk Max) from the dropdown menus. Enter a strong, memorable master password. If your threat model requires it, you may also configure a **Deception Passcode** under the Advanced Security Options.
 
 <p align="center">
   <img src="../images/enc1.png" alt="Ombracrypt Algorithm Configuration" width="450">
@@ -37,10 +37,6 @@ Open your system file explorer and navigate to the directory where your original
 
 **Crucial Security Step:** Your vault (`.obv`) is now quantum-secure and can be safely uploaded to the cloud or transmitted over untrusted networks. However, you **must** move the `.obk` key file to a physically and logically separate, highly secure location (such as an offline USB flash drive). Without *both* the `.obk` file and your master password, the vault cannot be decrypted by anyone.
 
-<div align="center">
-  <img src="../images/enc5.png" alt="Generated Vault and Key Files" width="600">
-</div>
-
 ## How to Decrypt Your Data
 
 **Step 1: Selecting Your Assets**
@@ -56,5 +52,13 @@ Enter your standard master password and execute the decryption. The engine will 
   <img src="../images/dec1.png" alt="Ombracrypt Decryption Interface" width="450">
 </div>
 
-> **⚠️ Critical Feature: Panic Passphrase (Duress Code)**
-> If you find yourself in a compromised physical environment where an intruder is coercing you to unlock the vault, input your pre-configured **Panic Password** instead of your master password. Activating this duress code will instantly and permanently delete the `.obk` key file from the system. Without this key, the vault becomes permanently inaccessible, successfully neutralizing the threat to your data.
+> **⚠️ Critical Feature: Deception Passcode (Duress Code)**
+>
+> The Deception Passcode is a specialized anti-forensic failsafe designed for extreme threat models, specifically for situations where you are under physical coercion and being forced to unlock your vault. Because this mechanism is destructive, it is vital to understand exactly how it operates:
+>
+> * **The Scenario:** If a hostile actor forces you to decrypt your data, you will launch the Ombracrypt decryption interface exactly as you normally would.
+> * **The Action:** When prompted for your credentials, you will input your pre-configured **Deception Passcode** *instead* of your actual Master Password.
+> * **The Execution:** The application will silently accept the passcode without throwing an error or alerting the intruder. However, instead of decrypting the payload, the engine will instantly and permanently wipe the `.obk` (Quantum Key) file from your local hardware.
+> * **The Result:** Because Ombracrypt utilizes a split-key architecture, the destruction of the `.obk` file instantly breaks the cryptographic chain. The `.obv` (Encrypted Vault) file becomes permanently mathematically inaccessible to everyone—including you and the attacker.
+> 
+> **Important:** This action is strictly irreversible. Activating the Deception Passcode permanently neutralizes the threat by destroying the keys to your data, so it should only be triggered in absolute emergencies.
