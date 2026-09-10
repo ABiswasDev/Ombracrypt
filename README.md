@@ -78,8 +78,6 @@ To restore your files, select your `.obv` vault and `.obk` key file, input your 
 
 * **Abhishek Biswas** – *Lead Maintainer* – [@ABiswasDev](https://github.com/ABiswasDev)
 
-Ombracrypt is built with security and transparency in mind. Contributions, code audits, and feature requests from the open-source cybersecurity community are highly encouraged.
-
 ## License
 Ombracrypt is open-source and licensed under the **AGPL-3.0 License**. We welcome code reviews, audits, and contributions to ensure the highest standard of security.
 
