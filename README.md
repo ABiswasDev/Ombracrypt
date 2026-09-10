@@ -48,9 +48,15 @@ Transparency is paramount in cryptographic tooling. Ombracrypt is strictly desig
 * **Hardware-Level Failsafes:** Engineered with strict OS-level error trapping, the engine intercepts hardware limitations (such as disk storage exhaustion) and executes secure cleanup protocols to prevent data corruption.
 * **100% Edge-Case Validated:** The processing pipeline is natively designed to handle structural anomalies, including zero-byte directories and strict filesystem permission walls.
 
-For a detailed understanding of the application's underlying engineering, please read the [Architecture Document](https://github.com/ABiswasDev/Ombracrypt/blob/main/docs/ARCHITECTURE.md) and for a full cryptanalysis, refer to the [PQC Cryptography Document](https://github.com/ABiswasDev/Ombracrypt/blob/main/docs/CRYPTOGRAPHY.md)
+## Documentation
 
-## Installation & Usage
+For a comprehensive understanding of Ombracrypt's operation, engineering, and cryptographic proofs, please refer to our dedicated documentation files:
+
+* **[Quick Start Guide](docs/QUICKSTART.md):** Visual, step-by-step instructions for encrypting and decrypting your first vault.
+* **[System Architecture](docs/ARCHITECTURE.md):** A detailed breakdown of the Tauri/Rust isolation, the IPC bridge, and the memory-safe streaming engine.
+* **[Cryptographic Threat Model](docs/CRYPTOGRAPHY.md):** In-depth cryptanalysis, entropy proofs, and the complete Post-Quantum Key Encapsulation pipeline.
+
+## Download &Installation
 
 Download the latest stable release from our [Releases Page](https://github.com/ABiswasDev/Ombracrypt/releases).
 
@@ -63,12 +69,16 @@ To secure your data, first organize your target files into a single directory. L
 
 To restore your files, select your `.obv` vault and `.obk` key file, input your master passphrase, and initiate the decryption process. 
 
-For detailed, visual step-by-step instructions for users, please read our official Tutorial or [Quickstart Guide](docs/QUICKSTART.md).
-
 ## Best Practices
 * **Passphrase Management:**Either completely memorize your master passphrase, or store it in a secure, offline password manager. Never store passphrases in plain text.
 * **Separation of Assets:** Always store your Ombracrypt Key (`.obk`) in a physically and logically separate location from your encrypted Ombracrypt Vault (`.obv`) to prevent a single-point-of-failure compromise.
 * **Data Verification:** Verify that the encryption process completed successfully and that you can decrypt the vault before permanently deleting or wiping the original, unencrypted source files.
+
+## Author & Contributors
+
+* **Abhishek Biswas** – *Lead Maintainer* – [@ABiswasDev](https://github.com/ABiswasDev)
+
+Ombracrypt is built with security and transparency in mind. Contributions, code audits, and feature requests from the open-source cybersecurity community are highly encouraged.
 
 ## License
 Ombracrypt is open-source and licensed under the **AGPL-3.0 License**. We welcome code reviews, audits, and contributions to ensure the highest standard of security.
@@ -98,7 +108,7 @@ Ensure your development environment has the following core tools installed:
 **2. Local Setup & Execution**
 ```bash
 # Clone the repository
-git clone https://github.com/ABiswasDev/Ombracrypt.git
+git clone [https://github.com/ABiswasDev/Ombracrypt.git](https://github.com/ABiswasDev/Ombracrypt.git)
 cd Ombracrypt
 
 # Install frontend dependencies
@@ -106,9 +116,34 @@ npm install
 
 # Launch the application in development mode (with hot-reloading)
 npm run tauri dev
+```
 
 **3. Building for Production**
 To build the optimized release binaries for your current operating system, run:
 `npm run tauri build`
 
 The compiled installation files will be generated inside the `src-tauri/target/release/bundle/` directory.
+
+**4. Contribution & Automated CI/CD Releases**
+Ombracrypt uses a GitHub Actions CI/CD pipeline to automatically compile, sign, and draft cross-platform releases for Windows, macOS, and Linux. 
+
+**For Contributors (Standard Flow):**
+```bash
+# 1. Create a feature branch
+git checkout -b feature/your-feature-name
+
+# 2. Commit your changes with a descriptive message
+git add .
+git commit -m "feat: added new cipher UI"
+
+# 3. Push and open a Pull Request on GitHub
+git push origin feature/your-feature-name
+```
+
+**For Maintainers (Triggering the Pipeline):**
+The automated release script is triggered by pushing a version tag to the main branch.
+```bash
+# Pushing a new version tag runs the CI/CD pipeline
+git tag v0.2.4
+git push origin v0.2.4
+```
