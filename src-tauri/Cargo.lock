@@ -3754,7 +3754,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-app"
-version = "0.3.3"
+version = "0.4.3"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -3764,12 +3764,14 @@ dependencies = [
  "rand",
  "serde",
  "serde_json",
+ "sha2",
  "tar",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "x25519-dalek",
+ "zeroize",
 ]
 
 [[package]]
