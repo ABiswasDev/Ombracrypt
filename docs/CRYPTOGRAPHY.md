@@ -145,7 +145,7 @@ The final step strips the output into two distinct files to enable air-gapped se
 
 To decrypt the vault, the system requires the `.obk` file, the `.obv` file, and the user's exact Master Password to perfectly reverse this synthesis flow.
 
-<p align="center"><img src="../images/image_72cfaa.jpg" alt="Figure 1: Post-Quantum Vault Encryption Pipeline" width="800"></p>
+<p align="center"><img src="../images/pqc_crypto.png" alt="Figure 1: Post-Quantum Vault Encryption Pipeline" width="800"></p>
 
 ## 6. Implemented Cryptographic Primitives
 
