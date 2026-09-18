@@ -247,7 +247,7 @@ cryptoForm.addEventListener("submit", async (e) => {
 
   const cipher = document.getElementById("cipher-algo").value;
   const kem = document.getElementById("kem-algo").value;
-  const panicPin = document.getElementById("panic-pin").value;
+  const deceptionPasscode = document.getElementById("deception-passcode").value;
 
   // Reset UI for a fresh operation
   progressContainer.style.display = "block";
@@ -269,7 +269,7 @@ cryptoForm.addEventListener("submit", async (e) => {
       cipher: cipher,
       kem: kem,
       mainPin: mainPin,
-      panicPin: panicPin
+      deceptionPasscode: deceptionPasscode
     });
 
     statusMsg.textContent = response;

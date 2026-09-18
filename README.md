@@ -36,17 +36,40 @@ Transparency is paramount in cryptographic tooling. Ombracrypt is strictly desig
 *   **Secure Bundling:** Consolidating multiple heterogeneous files into a single encrypted `.obv` vault for streamlined, organized data management.
 *   **Physical & Local Security:** Mitigating unauthorized local access and protecting payloads against the physical theft of offline storage devices.
 *   **Supply Chain Integrity:** Ensuring transparent, verifiable release binaries through automated GitHub Actions CI/CD 
-* **Anti-Coercion (Deception Passcode):** Mitigating physical duress via a secondary passcode that mimics a successful unlock, but silently destroys the Ombracrypt Key (\.obk`) to ensure plausible deniability.`
+*   **Anti-Coercion (Deception Passcode):** Mitigates interactive physical duress via an optional secondary passcode that silently overwrites the Ombracrypt Key (`.obk`) with random noise and returns a standard decryption failure error to maintain plausible deniability.
 
 **Out of Scope:**
 *   **Endpoint Compromise:** Defending against active keyloggers, memory scraping, screen-recording malware, or inherently compromised host operating systems.
 *   **Data Recovery:** Retrieving encrypted payloads if the master passphrase is forgotten or the Ombracrypt Key (`.obk`) file is permanently lost. Our zero-knowledge architecture means there are absolutely no backdoors.
 
-## Core Architecture and Cryptanalysis (v0.3.3)
+## Core Architecture and Cryptanalysis (v0.4.3)
 
-* **Chunked Streaming Engine:** Ombracrypt utilizes a strict 1MB chunked streaming architecture, enabling the encryption of massive payloads while maintaining a near-zero RAM footprint.
-* **Hardware-Level Failsafes:** Engineered with strict OS-level error trapping, the engine intercepts hardware limitations (such as disk storage exhaustion) and executes secure cleanup protocols to prevent data corruption.
-* **100% Edge-Case Validated:** The processing pipeline is natively designed to handle structural anomalies, including zero-byte directories and strict filesystem permission walls.
+* **Hybrid KEM Engine:** Implements the X-Wing hybrid paradigm, fusing classical X25519 Elliptic Curve Diffie-Hellman with Post-Quantum ML-KEM (Kyber-768/1024) through a SHA-256 combiner to mitigate both classical and quantum attacks.
+* **Chunked Streaming Engine:** Utilizes a strict 1MB chunked streaming architecture, enabling the encryption of large payloads while maintaining a low, predictable RAM footprint.
+* **Hardware-Level Failsafes:** Engineered with OS-level error interception to catch hardware-bound interruptions (such as filesystem storage exhaustion) and trigger secure rollback cleanup.
+* **Memory Zeroization:** Integrates the `zeroize` crate to force automatic memory scrubbing of all ephemeral keys, passcodes, and shared secrets from active RAM upon task completion.
+
+## Known Limitations & Mitigation Best Practices
+
+Ombracrypt is designed with strict security parameters, but users must understand its operational boundaries. Below are the known limitations alongside actionable best practices to mitigate them.
+
+### 1. Operational & Environmental Risks
+*   **Crash Data Remanence (`.tmp.tar` Vulnerability):** To encrypt large payloads without exhausting RAM, the engine dynamically bundles your selected files into a temporary `.tmp.tar` file on your local disk. If your computer loses power, crashes, or the OS forcefully kills the process mid-encryption, the secure rollback protocol will not execute, leaving the unencrypted archive exposed on your drive.
+    *   *Best Practice:* If an unexpected crash occurs during encryption, manually inspect the target directory and securely delete any lingering `.tmp.tar` files. Avoid encrypting highly sensitive payloads on unstable hardware or failing drives.
+*   **Endpoint Compromise:** Ombracrypt assumes the host operating system is secure. It provides zero protection against active keyloggers, memory-scraping malware, screen recorders, or rootkits.
+    *   *Best Practice:* Only execute Ombracrypt on trusted, malware-free machines. For extreme threat models, execute the encryption pipeline on a completely air-gapped system or a Live USB Linux environment.
+
+### 2. Cryptographic & Human Factors
+*   **Zero-Knowledge Absolute Data Loss:** There are no backdoors, secondary master keys, or recovery mechanisms. If you forget your Master Password, or if the `.obk` key file is deleted or corrupted, your data is mathematically unrecoverable.
+    *   *Best Practice:* Maintain physical, offline backups of your `.obk` key files (e.g., on secure USB drives) separated logically and physically from the encrypted `.obv` vaults.
+*   **The Password Bottleneck:** The X-Wing Hybrid KEM secures the payload against quantum algorithms (like Shor's), but the vault remains locked by a symmetric key derived from your human password. A weak password bypasses the quantum defenses entirely.
+    *   *Best Practice:* Utilize a high-entropy, cryptographically strong Master Password (such as a 6-word Diceware passphrase) to maximize the Argon2id KDF bottleneck.
+
+### 3. Duress Trapdoor Constraints
+*   **Offline Trapdoor Bypass:** The Plausibly Deniable Duress Trapdoor strictly defends against interactive physical coercion. It does not protect against offline analysis; an attacker who steals your `.obk` file can use a hex editor to manually delete the final 32 bytes (the Phantom Block), disabling the trapdoor entirely before attempting to brute-force the file.
+    *   *Best Practice:* Rely on the trapdoor solely for real-time physical duress scenarios where you are forced to interact with the application UI. The trapdoor is a behavioral defense, not a mathematical absolute.
+*   **Irreversible Destruction:** Triggering the trapdoor is permanently destructive. It overwrites the Kyber and X25519 private keys with cryptographically secure random noise, locking the vault forever.
+    *   *Best Practice:* Never test the Deception Passcode on a live vault without backing up the `.obk` file first. To ensure you do not permanently lose your own data after surviving a coercion event, you must rely on a hidden, offline backup of your original `.obk` file.
 
 ## Documentation
 
@@ -69,17 +92,15 @@ To secure your data, first organize your target files into a single directory. L
 
 To restore your files, select your `.obv` vault and `.obk` key file, input your master passphrase, and initiate the decryption process. 
 
-## Best Practices
-* **Passphrase Management:**Either completely memorize your master passphrase, or store it in a secure, offline password manager. Never store passphrases in plain text.
-* **Separation of Assets:** Always store your Ombracrypt Key (`.obk`) in a physically and logically separate location from your encrypted Ombracrypt Vault (`.obv`) to prevent a single-point-of-failure compromise.
-* **Data Verification:** Verify that the encryption process completed successfully and that you can decrypt the vault before permanently deleting or wiping the original, unencrypted source files.
-
 ## Author & Contributors
 
 * **Abhishek Biswas** – *Lead Maintainer* – [@ABiswasDev](https://github.com/ABiswasDev)
 
-## License
-Ombracrypt is open-source and licensed under the **AGPL-3.0 License**. We welcome code reviews, audits, and contributions to ensure the highest standard of security.
+## License & Legal Disclaimer
+
+* **AGPL-3.0 License:** Ombracrypt is strictly open-source and licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). This is a strong copyleft license designed to keep the code free and open. Any individual or organization that modifies, distributes, or offers this software as a service over a network is legally required to release their modified source code under the exact same AGPL-3.0 license. This prevents proprietary capture or closed-source commercialization of the project. We welcome code reviews, audits, and contributions to ensure the highest standard of security. Any violation of these terms—including the unauthorized distribution or monetization of closed-source derivatives—constitutes copyright infringement and will be met with strict legal enforcement.
+
+* **Liability & Ethical Use:** Ombracrypt is an experimental R&D project created solely to enhance cryptographic awareness and provide robust personal data security. The developer and maintainers assume zero responsibility or liability for any misuse, unethical application, or illegal activity conducted using this software. It is provided strictly for educational and personal data-protection purposes. Users assume full, sole responsibility for ensuring their use of this software complies with all applicable local, regional, and international laws, and adheres strictly to the terms of the AGPL-3.0 license.
 
 ## Developer Guide: Building from Source
 
@@ -106,7 +127,7 @@ Ensure your development environment has the following core tools installed:
 **2. Local Setup & Execution**
 ```bash
 # Clone the repository
-git clone [https://github.com/ABiswasDev/Ombracrypt.git](https://github.com/ABiswasDev/Ombracrypt.git)
+git clone https://github.com/ABiswasDev/Ombracrypt.git
 cd Ombracrypt
 
 # Install frontend dependencies
@@ -142,6 +163,55 @@ git push origin feature/your-feature-name
 The automated release script is triggered by pushing a version tag to the main branch.
 ```bash
 # Pushing a new version tag runs the CI/CD pipeline
-git tag v0.2.4
-git push origin v0.2.4
+git tag v0.4.3
+git push origin v0.4.3
 ```
+
+## Project structure
+
+```plaintext
+ombracrypt/
+├── package.json              # Node dependencies, scripts, and build runners
+├── docs/                     # Architectural specifications and threat models
+│   ├── ARCHITECTURE.md       # Pipeline mechanics, memory zeroization, error trapping
+│   └── CRYPTOGRAPHY.md       # Formal cryptanalysis, KEM proofs, and entropy calculations
+│   └── QUICKSTART.md         # Tutorial for using Application
+├── images/                   # Architecture schematics, diagrams, and UI assets
+├── src/                      # Frontend Presentation Layer (Tauri Webview)
+│   ├── index.html            # Main application layout and modal views
+│   ├── main.js               # UI event bindings, state teardown, and IPC invocations
+│   ├── styles.css            # Layout styling and UI visual design
+│   └── assets/               # Frontend vector icons and branding assets
+│
+└── src-tauri/                # Cryptographic Core & Backend (Native Rust)
+    ├── Cargo.toml            # Rust dependencies (pqcrypto-kyber, x25519-dalek, zeroize)
+    ├── tauri.conf.json       # Tauri system configuration, permissions, and build targets
+    ├── build.rs              # Native platform build script
+    └── src/
+        ├── main.rs           # Desktop application runtime entry point
+        ├── lib.rs            # IPC command router & immediate memory zeroization wrapper
+        ├── crypto.rs         # Hybrid KEM (Kyber + X25519), Argon2id KDF, XOR key synthesis
+        ├── pipeline.rs       # 1MB chunked streaming engine, TAR I/O, AEAD ciphers
+        └── deception.rs      # Duress trapdoor protocol & silent .obk random-noise scrambler
+```
+
+## Edge-Case Validation & Testing
+
+Ombracrypt’s cryptographic core is engineered to handle extreme edge cases and hostile environmental conditions. When running local builds or contributing to the repository, ensure your changes pass the following validation matrix.
+
+### 1. Filesystem & I/O Boundaries (Legacy & Core)
+*   **Zero-Byte Payloads:** Encrypting completely empty directories or 0-byte files to ensure the TAR bundler and AEAD cipher do not panic on null inputs.
+*   **Deep Path Nesting:** Processing directory trees that exceed standard OS character limits (e.g., >256 characters on Windows) to validate structural preservation.
+*   **Permission Walls:** Attempting to ingest files with strict read-only or elevated-admin-only permissions to ensure the engine gracefully skips or halts without corrupting the active vault stream.
+*   **Storage Exhaustion:** Filling the host drive to 99% capacity prior to encryption/decryption to verify that the OS-level `disk full` hardware interrupt correctly triggers the secure rollback and artifact deletion protocol.
+*   **RAM Exhaustion Override:** Encrypting a payload significantly larger than the host machine's total available RAM (e.g., a 25GB file on a 16GB system) to validate the 1MB chunked streaming pipeline.
+
+### 2. Cryptographic Integrity (v0.4.3 Upgrades)
+*   **Key File Truncation:** Passing an `.obk` file smaller than 32 bytes to the decryption engine. The engine must immediately abort before attempting to slice the Phantom Block, preventing out-of-bounds memory panics.
+*   **Header Tampering:** Modifying a single byte of the public salt, nonce, or Hybrid Ciphertext within the `.obv` file using a hex editor. The HKDF and AEAD authentication tags must instantly reject the payload.
+*   **Process Termination (SIGKILL):** Force-killing the application mid-encryption to validate the known environmental limitation (leaving the `.tmp.tar` on disk) versus mid-decryption.
+
+### 3. Deception Protocol Mechanics (v0.4.3 Upgrades)
+*   **The Trapdoor Trigger:** Entering the exact Deception Passcode into the main decryption prompt. The test must verify that the UI returns a standard cipher failure error, while the `.obk` file is verified via hex-editor to be permanently overwritten with 100% random noise.
+*   **Blank Passcode Parsing:** Leaving the Deception Passcode blank during encryption, and attempting to decrypt with a blank password. The engine must recognize the 32-byte appended block as random noise, not a hashed blank string, ensuring the trapdoor does not misfire.
+*   **Accidental Trigger Prevention (Password Mismatch):** Attempting to decrypt the vault with an incorrect Master Password, a typo, or a random string. The test must verify that the trapdoor is strictly bypassed, the `.obk` key file remains entirely intact, and the engine safely halts with a standard authentication failure.

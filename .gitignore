@@ -31,3 +31,9 @@ src-tauri/gen/
 *.decrypted.tmp.tar
 *.obv
 *.obk
+
+# Environment variables and cross-platform junk
+.env
+.env.*
+Thumbs.db
+**/*.rs.bk

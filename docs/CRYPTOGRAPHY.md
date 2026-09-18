@@ -108,7 +108,7 @@ $$5.418 \times 10^9 \text{ seconds} \approx \textbf{171.8 years}$$
 
 Even utilizing the theoretically weakest internal configuration (X-Wing + AES-256-GCM), against a state-actor equipped with a CRQC (Cryptographically Relevant Quantum Computer), and assuming the total physical theft of the cryptographic key file, **Ombracrypt protects a standard 12-character password from quantum brute-force compromise for over 170 years.**
 
-## 5. Cryptographic Pipeline: Key Synthesis and Vault Encapsulation
+## 5. Cryptographic Pipeline: Key Synthesis and Vault Encapsulation (v0.4.3)
 
 The Ombracrypt architecture enforces a strict physical and cryptographic separation of the asymmetric key encapsulation from the symmetric payload. This section details the deterministic flow of entropy from user input to the final output artifacts.
 
@@ -117,20 +117,20 @@ The pipeline initiates when the user provides the **Master Password** and select
 1. A high-entropy, 128-bit cryptographic salt is generated via the OS-level CSPRNG.
 2. The Master Password and salt are passed into the **Argon2id** Key Derivation Function.
 3. Argon2id produces a 256-bit symmetric intermediate key, denoted as $K_{Argon}$.
-4. *(Optional)* If the user provides a **Deception Passcode**, it is independently hashed via Argon2id to create a secondary honeypot verification hash.
+4. *(Optional)* If the user provides a **Deception Passcode**, it is independently hashed via Argon2id (using the vault's exact salt) to create a secondary Plausibly Deniable Duress Trapdoor hash.
 
-### Phase 2: Hybrid KEM Instantiation
-In parallel to the KDF process, the system generates the post-quantum asymmetric layer.
-1. The **X-Wing** (Kyber-768 + X25519) algorithm initializes, generating an ephemeral public/private keypair.
-2. The KEM encapsulation function runs against the public key, producing two outputs: 
-   * A 256-bit **Shared Secret** ($SS$).
-   * A **KEM Ciphertext** ($C_{KEM}$) which is required to decapsulate the secret later.
+### Phase 2: Hybrid KEM Instantiation (X-Wing Standard)
+In parallel to the KDF process, the system generates the dual-layer asymmetric layer.
+1. The **X-Wing** (Kyber-768 + X25519) algorithm initializes, simultaneously generating a classical ephemeral keypair (X25519) and a post-quantum keypair (Kyber).
+2. The classical and quantum shared secrets are independently established.
+3. These two distinct machine secrets are routed into a Hash-based Key Derivation Function (HKDF) utilizing **SHA-256** to mathematically bind them into a single, unbreakable **Hybrid Shared Secret** ($SS_{Hybrid}$).
+4. The public components are concatenated into a **Hybrid Ciphertext**, and the private components are concatenated into a **Hybrid Private Key**.
 
 ### Phase 3: Master Key Synthesis
-Ombracrypt does not rely on a single point of failure. The symmetric entropy derived from the human password must be cryptographically fused with the post-quantum entropy.
-1. $K_{Argon}$ and the Shared Secret ($SS$) are routed into a Hash-based Key Derivation Function (HKDF) utilizing SHA-256.
-2. The HKDF binds both sources of entropy, yielding the final 256-bit **Master Key** ($K_{Master}$):
-$$K_{Master} = \text{HKDF}(K_{Argon} \parallel SS)$$
+Ombracrypt does not rely on a single point of failure. The symmetric entropy derived from the human password must be cryptographically fused with the post-quantum machine entropy.
+1. $K_{Argon}$ and the $SS_{Hybrid}$ are combined using a **Bitwise XOR** operation.
+2. This fusion yields the final 256-bit **Master Key** ($K_{Master}$):
+$$K_{Master} = K_{Argon} \oplus SS_{Hybrid}$$
 
 ### Phase 4: Data Encapsulation Mechanism (DEM)
 With the final $K_{Master}$ synthesized, the system processes the user's raw data utilizing a memory-safe streaming architecture.
@@ -140,19 +140,19 @@ With the final $K_{Master}$ synthesized, the system processes the user's raw dat
 
 ### Phase 5: Artifact Separation and Storage
 The final step strips the output into two distinct files to enable air-gapped security and physical key management.
-* **The Vault (`.obv`):** Contains only the symmetric ciphertext of the payload and the cipher's authentication tag. It contains zero key material.
-* **The Quantum Key (`.obk`):** Contains the KEM Ciphertext ($C_{KEM}$), the KDF Salt, the symmetric Nonce, algorithm headers, and the Deception Hash (if the honeypot was activated). 
+* **The Vault (`.obv`):** Contains the symmetric ciphertext of the data payload. Its unencrypted header stores all public mathematical ingredients: the Hybrid Ciphertext, the 128-bit KDF Salt, the cipher Nonce, and algorithm identifiers. It contains zero private key material.
+* **The Quantum Key (`.obk`):** Contains strictly the highly sensitive private key material. It holds the Hybrid Private Key (Kyber Private Key + X25519 Static Secret). Appended to the very end of this file is the 32-byte Plausibly Deniable Duress Trapdoor block (either the Deception Hash or random noise).
 
 To decrypt the vault, the system requires the `.obk` file, the `.obv` file, and the user's exact Master Password to perfectly reverse this synthesis flow.
 
-<p align="center"><img src="../images/pqc_crypto.png" alt="Figure 1: Post-Quantum Vault Encryption Pipeline" width="800"></p>
+<p align="center"><img src="../images/image_72cfaa.jpg" alt="Figure 1: Post-Quantum Vault Encryption Pipeline" width="800"></p>
 
 ## 6. Implemented Cryptographic Primitives
 
 Ombracrypt relies exclusively on peer-reviewed, standard-compliant algorithms. The architecture divides these primitives into asymmetric encapsulation for securing the keys and symmetric encapsulation for the data payload.
 
 ### 6.1 Asymmetric Key Encapsulation Mechanisms (KEMs)
-These algorithms are responsible for safely generating and wrapping the Shared Secret ($SS$) used to synthesize the Master Key.
+These algorithms are responsible for safely generating and wrapping the Shared Secret used to synthesize the Master Key.
 
 *   **X-Wing (Hybrid KEM):** 
     *   *Development:* Introduced in early 2024 as an Internet-Draft standard.
