@@ -121,10 +121,10 @@ pub fn decapsulate_hybrid_kem(kem_id: u8, combined_sk: &[u8], combined_ct: &[u8]
         pqcrypto_kyber::kyber768::decapsulate(&ct, &sk).as_bytes().to_vec()
     };
 
-    // 2. Classical X25519 Decapsulation (DH)
-    let mut sk_array = [0u8; 32];
+    // 2. Classical X25519 Decapsulation (DH) - FIXED MEMORY LEAK
+    let mut sk_array = Zeroizing::new([0u8; 32]);
     sk_array.copy_from_slice(x25519_sk_bytes);
-    let vault_secret = StaticSecret::from(sk_array);
+    let vault_secret = StaticSecret::from(*sk_array);
 
     let mut pk_array = [0u8; 32];
     pk_array.copy_from_slice(x25519_pk_bytes);

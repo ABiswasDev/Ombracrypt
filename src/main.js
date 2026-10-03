@@ -24,6 +24,11 @@ const strengthContainer = document.getElementById("password-strength-container")
 const strengthBar = document.getElementById("password-strength-bar");
 const strengthText = document.getElementById("password-strength-text");
 
+// --- Deception Validation Elements ---
+const deceptionInput = document.getElementById("deception-passcode");
+const confirmDeceptionInput = document.getElementById("confirm-deception-passcode");
+const deceptionMatchMsg = document.getElementById("deception-match-msg");
+
 // --- Progress & ETA Elements ---
 const progressContainer = document.getElementById("progress-container");
 const progressBar = document.getElementById("progress-bar");
@@ -36,12 +41,14 @@ let currentMode = "ENCRYPT"; // Default state
 let targetPath = null;
 let keyPath = null;
 let operationStartTime = 0; // Tracks when cryptography starts
+let streamStartTime = 0; // Tracks when streaming actually starts
 
 // --- Real-time Password Validation Logic ---
 mainPinInput.addEventListener("input", () => {
   if (currentMode === "ENCRYPT") {
     checkPasswordStrength(mainPinInput.value);
     checkPasswordMatch();
+    checkDeceptionValidation(); // Re-check if master matches deception
   }
 });
 
@@ -103,6 +110,42 @@ function checkPasswordMatch() {
     matchMsg.style.color = "#ff4444"; 
   }
 }
+
+// --- Deception Passcode Validation ---
+function checkDeceptionValidation() {
+  const masterPin = mainPinInput.value;
+  const d1 = deceptionInput.value;
+  const d2 = confirmDeceptionInput.value;
+
+  if (!d1 && !d2) {
+    deceptionMatchMsg.textContent = "";
+    return;
+  }
+
+  // 1. Prevent Master Password & Deception Passcode Collision
+  if (d1 && masterPin && d1 === masterPin) {
+    deceptionMatchMsg.textContent = "Passcode cannot match Master Password ✗";
+    deceptionMatchMsg.style.color = "#ff4444";
+    return;
+  }
+
+  // 2. Check Confirmation Match
+  if (!d2) {
+    deceptionMatchMsg.textContent = "";
+    return;
+  }
+
+  if (d1 === d2) {
+    deceptionMatchMsg.textContent = "Deception passcodes match ✓";
+    deceptionMatchMsg.style.color = "#00C851";
+  } else {
+    deceptionMatchMsg.textContent = "Deception passcodes do not match ✗";
+    deceptionMatchMsg.style.color = "#ff4444";
+  }
+}
+
+deceptionInput.addEventListener("input", checkDeceptionValidation);
+confirmDeceptionInput.addEventListener("input", checkDeceptionValidation);
 
 // --- Shared Selection Handler ---
 function handleSelection(selectedPath) {
@@ -186,8 +229,6 @@ function enableEncryptMode() {
 }
 
 // --- Bridge to Rust Backend & ETA Logic ---
-let streamStartTime = 0; // New variable to track when streaming actually starts
-
 listen('crypto-progress', (event) => {
   const currentProgress = event.payload;
   
@@ -238,16 +279,35 @@ cryptoForm.addEventListener("submit", async (e) => {
 
   const mainPin = mainPinInput.value;
   const confirmPin = confirmPinInput.value;
+  const deceptionPasscode = deceptionInput.value;
+  const confirmDeception = confirmDeceptionInput.value;
 
-  if (currentMode === "ENCRYPT" && mainPin !== confirmPin) {
-    statusMsg.textContent = "Error: Passwords do not match. Please verify your master password.";
-    statusMsg.style.color = "#ff4444";
-    return;
+  if (currentMode === "ENCRYPT") {
+    // Check Master Password Match
+    if (mainPin !== confirmPin) {
+      statusMsg.textContent = "Error: Passwords do not match. Please verify your master password.";
+      statusMsg.style.color = "#ff4444";
+      return;
+    }
+
+    // Check Deception Constraints before sending payload to Rust
+    if (deceptionPasscode) {
+      if (deceptionPasscode === mainPin) {
+        statusMsg.textContent = "Error: Deception passcode cannot be identical to Master Password.";
+        statusMsg.style.color = "#ff4444";
+        return;
+      }
+
+      if (deceptionPasscode !== confirmDeception) {
+        statusMsg.textContent = "Error: Deception passcodes do not match. Please verify your deception passcode.";
+        statusMsg.style.color = "#ff4444";
+        return;
+      }
+    }
   }
 
   const cipher = document.getElementById("cipher-algo").value;
   const kem = document.getElementById("kem-algo").value;
-  const deceptionPasscode = document.getElementById("deception-passcode").value;
 
   // Reset UI for a fresh operation
   progressContainer.style.display = "block";
@@ -277,5 +337,17 @@ cryptoForm.addEventListener("submit", async (e) => {
   } catch (error) {
     statusMsg.textContent = "Error: " + error;
     statusMsg.style.color = "#ff4444";
+  } finally {
+    // FIX: Clear all sensitive password fields immediately after operation completes
+    mainPinInput.value = "";
+    confirmPinInput.value = "";
+    deceptionInput.value = "";
+    confirmDeceptionInput.value = "";
+    
+    // Reset the validation UI states
+    matchMsg.textContent = "";
+    deceptionMatchMsg.textContent = "";
+    strengthContainer.style.display = "none";
+    strengthText.style.display = "none";
   }
 });

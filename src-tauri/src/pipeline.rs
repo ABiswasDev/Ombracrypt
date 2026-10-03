@@ -36,10 +36,20 @@ pub fn encrypt_vault(
         let _ = fs::remove_file(&temp_tar_path);
         return Err(format!("Failed to bundle folder: {}", e));
     }
-    if let Err(e) = archive.finish() {
+    
+    // FIXED OS CACHE FLUSH (Encryption)
+let finished_tar = match archive.into_inner() {
+        Ok(f) => f,
+        Err(e) => {
+            let _ = fs::remove_file(&temp_tar_path);
+            return Err(format!("Failed to finish archive: {}", e));
+        }
+    };
+    if let Err(e) = finished_tar.sync_all() {
         let _ = fs::remove_file(&temp_tar_path);
-        return Err(format!("Failed to finish archive: {}", e));
+        return Err(format!("Failed to sync tar to disk: {}", e));
     }
+    drop(finished_tar);
 
     app.emit("crypto-progress", 30).map_err(|e| e.to_string())?;
 
@@ -281,7 +291,11 @@ pub fn decrypt_vault(
         if is_final == 1 { break; }
     }
 
+    // FIXED OS CACHE FLUSH (Decryption)
     tar_file_write.flush().map_err(|e| e.to_string())?;
+    tar_file_write.sync_all().map_err(|e| e.to_string())?; 
+    drop(tar_file_write); 
+
     app.emit("crypto-progress", 80).map_err(|e| e.to_string())?;
 
     let tar_file_read = File::open(&temp_tar_path).map_err(|e| format!("Failed to read decrypted archive: {}", e))?;
