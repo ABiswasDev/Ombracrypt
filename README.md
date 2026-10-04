@@ -10,8 +10,8 @@
 
 <p align="center">
   <a href="https://github.com/ABiswasDev/Ombracrypt/releases"><img src="https://img.shields.io/badge/Release-v1.0.0-007acc?style=for-the-badge" alt="Release"></a>
-  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-2d2d2d?style=for-the-badge" alt="Platform">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Open%20Source-28a745?style=for-the-badge" alt="License"></a>
+  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-2d2d2d?style=for-the-badge" alt="Platform">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-28a745?style=for-the-badge" alt="License"></a>
 </p>
 
 ### Overview & Features
