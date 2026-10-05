@@ -108,7 +108,7 @@ $$5.418 \times 10^9 \text{ seconds} \approx \textbf{171.8 years}$$
 
 Even utilizing the theoretically weakest internal configuration (X-Wing + AES-256-GCM), against a state-actor equipped with a CRQC (Cryptographically Relevant Quantum Computer), and assuming the total physical theft of the cryptographic key file, **Ombracrypt protects a standard 12-character password from quantum brute-force compromise for over 170 years.**
 
-## 5. Cryptographic Pipeline: Key Synthesis and Vault Encapsulation (v0.4.3)
+## 5. Cryptographic Pipeline: Key Synthesis and Vault Encapsulation
 
 The Ombracrypt architecture enforces a strict physical and cryptographic separation of the asymmetric key encapsulation from the symmetric payload. This section details the deterministic flow of entropy from user input to the final output artifacts.
 

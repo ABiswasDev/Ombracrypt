@@ -43,7 +43,7 @@ Transparency is paramount in cryptographic tooling. Ombracrypt is strictly desig
 *   **Endpoint Compromise:** Defending against active keyloggers, memory scraping, screen-recording malware, or inherently compromised host operating systems.
 *   **Data Recovery:** Retrieving encrypted payloads if the master passphrase is forgotten or the Ombracrypt Key (`.obk`) file is permanently lost. Our zero-knowledge architecture means there are absolutely no backdoors.
 
-## Core Architecture and Cryptanalysis (v1.0.0)
+## Core Architecture and Cryptanalysis
 
 * **Hybrid KEM Engine:** Implements the X-Wing hybrid paradigm, fusing classical X25519 Elliptic Curve Diffie-Hellman with Post-Quantum ML-KEM (Kyber-768/1024) through a SHA-256 combiner to mitigate both classical and quantum attacks.
 * **Chunked Streaming Engine:** Utilizes a strict 1MB chunked streaming architecture, enabling the encryption of large payloads while maintaining a low, predictable RAM footprint.
@@ -88,6 +88,8 @@ Download the latest stable release from our [Releases Page](https://github.com/A
 * **Linux (Red Hat-based distributions):** Download and install the `.rpm` package.
 * **Windows:** Download and run the `.exe` or `.msi` setup file.
 * **macOS:** Mount the `.dmg` image or extract the `.app.tar.gz` archive.
+
+> **Note for Windows Users:** Ombracrypt is an independent, open-source application. Because the installer is not signed with a commercial corporate certificate, Windows SmartScreen may flag it as an "unrecognized app." To proceed with the installation, click **"More info"** and then select **"Run anyway."**
 
 To secure your data, first organize your target files into a single directory. Launch Ombracrypt, select this directory via the interface, choose your preferred cryptographic algorithms, and set a strong Master Password (and an optional Deception Passcode). The engine will process the folder and output a Quantum-Safe Vault (.obv) and a corresponding Ombracrypt Key (.obk).
 
@@ -164,8 +166,8 @@ git push origin feature/your-feature-name
 The automated release script is triggered by pushing a version tag to the main branch.
 ```bash
 # Pushing a new version tag runs the CI/CD pipeline
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.x
+git push origin v1.x
 ```
 
 ## Project structure
@@ -207,12 +209,12 @@ Ombracrypt’s cryptographic core is engineered to handle extreme edge cases and
 *   **Storage Exhaustion:** Filling the host drive to 99% capacity prior to encryption/decryption to verify that the OS-level `disk full` hardware interrupt correctly triggers the secure rollback and artifact deletion protocol.
 *   **RAM Exhaustion Override:** Encrypting a payload significantly larger than the host machine's total available RAM (e.g., a 25GB file on a 16GB system) to validate the 1MB chunked streaming pipeline.
 
-### 2. Cryptographic Integrity (v1.0.0 Upgrades)
+### 2. Cryptographic Integrity
 *   **Key File Truncation:** Passing an `.obk` file smaller than 32 bytes to the decryption engine. The engine must immediately abort before attempting to slice the Phantom Block, preventing out-of-bounds memory panics.
 *   **Header Tampering:** Modifying a single byte of the public salt, nonce, or Hybrid Ciphertext within the `.obv` file using a hex editor. The HKDF and AEAD authentication tags must instantly reject the payload.
 *   **Process Termination (SIGKILL):** Force-killing the application mid-encryption to validate the known environmental limitation (leaving the `.tmp.tar` on disk) versus mid-decryption.
 
-### 3. Deception Protocol Mechanics (v1.0.0 Upgrades)
+### 3. Deception Protocol Mechanics
 *   **The Trapdoor Trigger:** Entering the exact Deception Passcode into the main decryption prompt. The test must verify that the UI returns a standard cipher failure error, while the `.obk` file is verified via hex-editor to be permanently overwritten with 100% random noise.
 *   **Blank Passcode Parsing:** Leaving the Deception Passcode blank during encryption, and attempting to decrypt with a blank password. The engine must recognize the 32-byte appended block as random noise, not a hashed blank string, ensuring the trapdoor does not misfire.
 *   **Accidental Trigger Prevention (Password Mismatch):** Attempting to decrypt the vault with an incorrect Master Password, a typo, or a random string. The test must verify that the trapdoor is strictly bypassed, the `.obk` key file remains entirely intact, and the engine safely halts with a standard authentication failure.

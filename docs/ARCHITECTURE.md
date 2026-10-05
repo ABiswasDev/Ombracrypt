@@ -20,7 +20,7 @@ Communication between the frontend and the backend is routed through Tauri's Int
   <img src="/images/arch1.png" alt="Ombracrypt System Architecture Diagram" width="800">
 </p>
 
-## 2. Memory-Safe Streaming Pipeline & Modularity (v0.4.3)
+## 2. Memory-Safe Streaming Pipeline & Modularity
 
 Version 0.4.3 introduces a modular Rust backend (separated into `crypto.rs`, `pipeline.rs`, `deception.rs`, and a routing `lib.rs`) and utilizes a deterministic, disk-streaming pipeline to manage memory consumption.
 
