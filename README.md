@@ -14,7 +14,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-28a745?style=for-the-badge" alt="License"></a>
 </p>
 
-### Overview & Features
+## Overview & Features
 
 Ombracrypt is a network-isolated, cross-platform Post-Quantum Cryptographic (PQC) file encryption utility dedicated to securing digital assets. It is explicitly designed to defend against future quantum computing-based cyberattacks, ensuring absolute data privacy without relying on external infrastructure or cloud services. The application combines an intuitive interface with a high-performance cryptographic engine.
 
@@ -27,6 +27,15 @@ Ombracrypt is a network-isolated, cross-platform Post-Quantum Cryptographic (PQC
 * **Modern Cryptography:** Utilizes NIST-standard file encryption algorithms validated through CAVP and CMVP.
 * **Hybrid KEM Architecture:** Employs a hybrid Key Encapsulation Mechanism (KEM) that combines traditional cryptography with Post-Quantum Cryptography (PQC) to provide enhanced encryption.
 
+
+## Engineered for Extreme Threat Models
+
+* **Split-Key Architecture (`.obv` + `.obk`):** Separates the encrypted data payload from private key material into two distinct artifacts, allowing vaults to rest on untrusted media while keys remain on isolated, offline hardware.
+* **Active Anti-Coercion Trapdoor:** Features a duress protocol that silently overwrites the cryptographic key file with secure random noise under physical coercion, throwing an ordinary decryption error to preserve plausible deniability.
+* **Post-Quantum Hybrid KEM:** Wraps file keys using lattice-based Key Encapsulation (ML-KEM/Kyber) alongside classical primitives, preventing key interception attacks from future quantum compute hardware.
+* **Memory-Hard Key Derivation:** Uses Argon2id to force intense RAM allocation for each password attempt, neutralizing high-speed GPU and ASIC brute-force clusters.
+* **Native Memory Zeroization:** Enforces automated, immediate overwriting of ephemeral keys, passcodes, and shared secrets in RAM via Rust's `zeroize` mechanics as soon as operations complete.
+* **Discrete Cloud-Safe Vaults:** Replaces fragile, monolithic virtual disk images with self-contained, stream-encrypted archives that sync cleanly across networks without mount conflicts or block-level corruption.
 
 ## Security & Threat Model
 Transparency is paramount in cryptographic tooling. Ombracrypt is strictly designed to secure data at rest against modern and future threats, but it operates under the assumption that the host environment itself is secure.
@@ -80,7 +89,23 @@ For a comprehensive understanding of Ombracrypt's operation, engineering, and cr
 * **[System Architecture](docs/ARCHITECTURE.md):** A detailed breakdown of the Tauri/Rust isolation, the IPC bridge, and the memory-safe streaming engine.
 * **[Cryptographic Threat Model](docs/CRYPTOGRAPHY.md):** In-depth cryptanalysis, entropy proofs, and the complete Post-Quantum Key Encapsulation pipeline.
 
-## Download &Installation
+## System Requirements
+
+**Minimum Specifications**
+* **OS:** Windows 10+ / macOS 11+ / Ubuntu 20.04+ / Red Hat & Fedora (or equivalent distros)
+* **Processor:** 64-bit dual-core CPU / AMD Athlon 64
+* **Memory:** 4 GB RAM
+* **Storage:** Any internal or external drive (HDD, SSD, Flash Drive). Must have free space equal to 2x the target payload size.
+
+**Recommended Specifications**
+* **OS:** Windows 11 / macOS 14 / Linux Mint 21+ 
+* **Processor:** Modern multi-core CPU (e.g., AMD Ryzen 5, Intel Core i5, or Apple Silicon M1/M2)
+* **Memory:** 8 GB RAM (16 GB optimal for heavy multitasking)
+* **Storage:** NVMe M.2 SSD (for maximum encryption speed). Must have free space equal to 2x the target payload size.
+
+> Ombracrypt is designed with a lightweight, disk-streaming architecture. Execution speed is primarily dependent on your storage drive's read/write performance.
+
+## Download & Installation
 
 Download the latest stable release from our [Releases Page](https://github.com/ABiswasDev/Ombracrypt/releases).
 
