@@ -38,6 +38,13 @@ fn emit_progress(app: Option<&AppHandle>, progress: u8) -> Result<(), String> {
     Ok(())
 }
 
+/// Flushes directory metadata to disk/USB so newly renamed files/folders appear immediately
+fn sync_parent_directory(dir: &Path) {
+    if let Ok(dir_handle) = File::open(dir) {
+        let _ = dir_handle.sync_all();
+    }
+}
+
 /// RAII Guard that automatically removes partial files on error or early return
 struct TempFileGuard {
     paths: Vec<PathBuf>,
@@ -518,8 +525,11 @@ pub fn generate_standalone_keypair(
         ));
     }
 
-    let obp_part = out_dir_path.join(format!("{}.obp.part", safe_stem));
-    let obk_part = out_dir_path.join(format!("{}.obk.part", safe_stem));
+    // Use dot-prefixed hidden staging files (.part)
+    let obp_part = out_dir_path.join(format!(".{}.obp.part", safe_stem));
+    let obk_part = out_dir_path.join(format!(".{}.obk.part", safe_stem));
+    let _ = fs::remove_file(&obp_part);
+    let _ = fs::remove_file(&obk_part);
 
     let mut guard = TempFileGuard::new(vec![obp_part.clone(), obk_part.clone()]);
 
@@ -545,6 +555,7 @@ pub fn generate_standalone_keypair(
 
     fs::rename(&obp_part, &obp_final).map_err(|e| e.to_string())?;
     fs::rename(&obk_part, &obk_final).map_err(|e| e.to_string())?;
+    sync_parent_directory(out_dir_path);
     guard.disarm();
 
     Ok(format!(
@@ -646,9 +657,10 @@ pub fn encrypt_vault_core(
         (1u8, n)
     };
 
-    // 3. Prepare Atomic Staging Paths (.part)
+    // 3. Prepare Hidden Atomic Staging Paths (.{name}.obv.part)
     let obv_final = vault_out_obj.join(format!("{}.obv", folder_name));
-    let obv_part = vault_out_obj.join(format!("{}.obv.part", folder_name));
+    let obv_part = vault_out_obj.join(format!(".{}.obv.part", folder_name));
+    let _ = fs::remove_file(&obv_part); // Clean up any stale interrupted .part file
 
     let mut staged_paths = vec![obv_part.clone()];
     let mut key_targets: Option<(PathBuf, PathBuf, PathBuf, PathBuf)> = None;
@@ -660,8 +672,10 @@ pub fn encrypt_vault_core(
         }
         let obk_final = key_dir.join(format!("{}.obk", folder_name));
         let obp_final = key_dir.join(format!("{}.obp", folder_name));
-        let obk_part = key_dir.join(format!("{}.obk.part", folder_name));
-        let obp_part = key_dir.join(format!("{}.obp.part", folder_name));
+        let obk_part = key_dir.join(format!(".{}.obk.part", folder_name));
+        let obp_part = key_dir.join(format!(".{}.obp.part", folder_name));
+        let _ = fs::remove_file(&obk_part);
+        let _ = fs::remove_file(&obp_part);
 
         staged_paths.push(obk_part.clone());
         staged_paths.push(obp_part.clone());
@@ -670,7 +684,7 @@ pub fn encrypt_vault_core(
 
     let mut guard = TempFileGuard::new(staged_paths);
 
-    // 4. Write Key Files to Staging (.part) if generating new keys
+    // 4. Write Key Files to Hidden Staging (.part) if generating new keys
     if let (Some((obp_bytes, obk_bytes)), Some((ref obk_part, _, ref obp_part, _))) =
         (generated_keys, &key_targets)
     {
@@ -719,7 +733,7 @@ pub fn encrypt_vault_core(
 
     emit_progress(app, 30)?;
 
-    // 6. Stream Directory -> In-Memory TAR Builder -> ChunkedEncryptWriter -> .obv.part
+    // 6. Stream Directory -> In-Memory TAR Builder -> ChunkedEncryptWriter -> .{name}.obv.part
     let encrypt_writer = ChunkedEncryptWriter {
         inner: vault_file,
         cipher_id,
@@ -749,13 +763,16 @@ pub fn encrypt_vault_core(
     vault_file.sync_all().map_err(|e| e.to_string())?;
     drop(vault_file);
 
-    // 7. Atomic Commit (.part -> final filenames)
+    // 7. Atomic Commit (.part -> final filenames) & Flush Directory Entries
     fs::rename(&obv_part, &obv_final).map_err(|e| format!("Failed to commit vault file: {}", e))?;
+    sync_parent_directory(vault_out_obj);
+
     if let Some((obk_part, obk_final, obp_part, obp_final)) = key_targets {
         fs::rename(&obk_part, &obk_final)
             .map_err(|e| format!("Failed to commit .obk file: {}", e))?;
         fs::rename(&obp_part, &obp_final)
             .map_err(|e| format!("Failed to commit .obp file: {}", e))?;
+        sync_parent_directory(Path::new(key_location));
     }
     guard.disarm();
 
@@ -874,7 +891,7 @@ pub fn decrypt_vault_core(
 
     emit_progress(app, 40)?;
 
-    // 4. Prepare Atomic Staging Directory for Safe Extraction
+    // 4. Prepare Hidden Atomic Staging Directory for Safe Extraction
     let vault_path_obj = Path::new(vault_path);
     let out_dir_obj = Path::new(output_dir);
     let file_stem = vault_path_obj
@@ -955,9 +972,11 @@ pub fn decrypt_vault_core(
         );
     }
 
-    // 5. Commit Staging Folder to Final Output Directory
+    // 5. Commit Staging Folder to Final Output Directory & Flush USB Directory Cache
     fs::rename(&stage_dir, &final_extract_dir)
         .map_err(|e| format!("Failed to finalize extracted output directory: {}", e))?;
+    sync_parent_directory(&final_extract_dir);
+    sync_parent_directory(out_dir_obj);
     dir_guard.disarm();
 
     emit_progress(app, 100)?;
@@ -1016,7 +1035,7 @@ mod tests {
 
         // Verify zero .tmp.tar or .part files exist anywhere
         assert!(!ws.join("sample_payload.tmp.tar").exists());
-        assert!(!vault_dir.join("sample_payload.obv.part").exists());
+        assert!(!vault_dir.join(".sample_payload.obv.part").exists());
 
         decrypt_vault_core(
             None,

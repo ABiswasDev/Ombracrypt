@@ -74,6 +74,12 @@ function switchMode(newMode) {
   statusMsg.textContent = "";
   actionBtn.disabled = false;
 
+  // FIX: Hide leftover progress bar from previous Encrypt/Decrypt run
+  progressContainer.style.display = "none";
+  progressBar.style.width = "0%";
+  if (progressPercent) progressPercent.textContent = "0%";
+  if (progressEta) progressEta.textContent = "";
+
   if (currentMode === "ENCRYPT") {
     modeEncryptTab.classList.add("active-tab");
     modeDecryptTab.classList.remove("active-tab");
