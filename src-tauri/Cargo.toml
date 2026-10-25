@@ -1,16 +1,11 @@
 [package]
 name = "tauri-app"
-version = "1.0.0"
-description = "A Tauri App"
-authors = ["you"]
+version = "1.1.0"
+description = "Ombracrypt Post-Quantum Vault"
+authors = ["Abhishek Biswas"]
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [lib]
-# The `_lib` suffix may seem redundant but it is necessary
-# to make the lib name unique and wouldn't conflict with the bin name.
-# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "tauri_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
@@ -20,20 +15,25 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri-plugin-dialog = "2"
 
-# Core Cryptography Engine Dependencies
+# Core Cryptography & Streaming Engine Dependencies
 tar = "0.4.40"
 chacha20poly1305 = "0.10.1"
 aes-gcm = "0.10.3"
 rand = "0.8.5"
 argon2 = "0.5.3"
 sha2 = "0.10.8"
-
-# Post-Quantum KEM Dependencies (For X-Wing and Cypherpunk Max)
-x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
-pqcrypto-kyber = "0.8.1"
-pqcrypto-traits = "0.3.5"
+sha3 = "0.10.8"
+hkdf = "0.12.4"
+subtle = "2.6.1"
 zeroize = "1.8.1"
+
+# NIST FIPS 203 ML-KEM & Classical X25519 Hybrid KEM
+fips203 = "0.4.3"
+x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
+
+# Cross-Platform Disk Space Telemetry
+fs2 = "0.4.3"

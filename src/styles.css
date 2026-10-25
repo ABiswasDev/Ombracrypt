@@ -17,30 +17,58 @@ body {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
   display: flex;
   justify-content: center;
-  align-items: flex-start; /* FIX: Locked to top instead of vertically centered */
+  align-items: flex-start;
   min-height: 100vh;
 }
 
 .container {
   width: 100%;
-  max-width: 450px;
-  padding: 30px 20px 20px 20px; /* FIX: Added top padding to push content slightly down */
+  max-width: 520px;
+  padding: 14px 18px 12px 18px;
+  box-sizing: border-box;
 }
 
 .header {
   text-align: center;
-  margin-bottom: 45px; 
+  margin-bottom: 12px;
 }
 
 .header h1 {
-  margin: 0 0 5px 0;
-  font-size: 1.8rem;
+  margin: 0 0 2px 0;
+  font-size: 1.55rem;
 }
 
 .header p {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 0.9rem;
+  font-size: 0.82rem;
+}
+
+/* Mode Switcher Tabs */
+.mode-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 8px;
+  background-color: #111111;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.85rem;
+  transition: all 0.2s ease;
+}
+
+.tab-btn.active-tab {
+  background-color: #162436;
+  color: #00e5ff;
+  border-color: #007acc;
+  box-shadow: 0 0 8px rgba(0, 122, 204, 0.4);
 }
 
 /* File & Folder Selection */
@@ -48,82 +76,114 @@ body {
   background-color: var(--panel-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 15px 20px; 
+  padding: 10px 14px;
   text-align: center;
-  margin-bottom: 15px; 
+  margin-bottom: 10px;
+}
+
+.divider-top {
+  margin-top: 8px;
+  border-top: 1px dashed #2a2a2a;
+  padding-top: 8px;
 }
 
 .secondary-btn {
   width: 100%;
-  background-color: #222222;
+  background-color: #1e1e1e;
   color: white;
-  border: 1px solid #444444;
-  padding: 10px 15px;
+  border: 1px solid #3d3d3d;
+  padding: 7px 12px;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 0.95rem;
+  font-size: 0.84rem;
   transition: background-color 0.2s;
 }
 
 .secondary-btn:hover {
-  background-color: #333333;
+  background-color: #2e2e2e;
 }
 
-#target-path-display {
-  margin: 15px 0 0 0;
+.key-btn-accent {
+  background-color: #16222f;
+  border-color: #007acc;
+}
+
+.path-label {
+  margin: 4px 0 0 0;
   color: var(--text-secondary);
-  font-size: 0.85rem;
-  word-break: break-all;
+  font-size: 0.74rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* Forms & Inputs */
+/* Storage Telemetry Box */
+.telemetry-box {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  border: 1px solid #444;
+  background-color: #141414;
+}
+
+.telemetry-ok {
+  border-color: #00C851;
+  color: #00C851;
+  background-color: rgba(0, 200, 81, 0.08);
+}
+
+.telemetry-error {
+  border-color: #ff4444;
+  color: #ff4444;
+  background-color: rgba(255, 68, 68, 0.1);
+}
+
+/* Side-by-Side Grids for Compact Height */
 .settings-group {
-  display: flex;
-  flex-direction: column;
-  gap: 10px; 
-  margin-bottom: 15px; 
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.password-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
 }
 
 .input-group {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
 }
 
 label {
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   color: var(--text-secondary);
 }
 
-input {
+input, select {
   width: 100%;
-  padding: 10px;
+  padding: 8px 10px;
   background-color: var(--panel-bg);
   border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--text-primary);
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   box-sizing: border-box;
 }
 
 select {
-  width: 100%;
-  padding: 10px;
-  background-color: var(--panel-bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-primary);
-  font-size: 0.95rem;
-  box-sizing: border-box;
   cursor: pointer;
-  /* Strip OS default styling */
   appearance: none;
   -webkit-appearance: none;
-  /* Add custom white dropdown arrow */
   background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23ffffff%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
   background-repeat: no-repeat;
   background-position: right 10px top 50%;
-  background-size: 12px auto;
+  background-size: 10px auto;
 }
 
 select option {
@@ -138,62 +198,71 @@ select:focus, input:focus {
 
 /* Advanced Options Accordion */
 .advanced-options {
-  margin-top: 10px; 
-  margin-bottom: 15px; 
+  margin-top: 8px;
+  margin-bottom: 8px;
 }
 
 .advanced-options summary {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: var(--text-secondary);
   cursor: pointer;
   user-select: none;
-  margin-bottom: 10px;
-  transition: color 0.2s;
-}
-
-.advanced-options summary:hover {
-  color: var(--text-primary);
+  margin-bottom: 6px;
 }
 
 .advanced-group {
-  margin-top: 10px;
-  padding-left: 10px;
+  margin-top: 6px;
+  padding-left: 8px;
   border-left: 2px solid var(--border);
 }
 
 small {
   color: var(--text-secondary);
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   display: block;
-  margin-top: 5px;
+  margin-top: 2px;
 }
 
 /* Action Button */
 #action-btn {
   width: 100%;
-  padding: 12px;
+  padding: 10px;
   background-color: var(--accent);
   color: white;
   border: none;
   border-radius: 4px;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: background-color 0.2s, opacity 0.2s;
+  margin-top: 8px;
 }
 
-#action-btn:hover {
+#action-btn:hover:not(:disabled) {
   background-color: var(--accent-hover);
+}
+
+#action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 #status-msg {
   text-align: center;
-  font-size: 0.85rem;
-  margin-top: 15px;
-  min-height: 20px;
+  font-size: 0.8rem;
+  margin: 8px 0 0 0;
+  min-height: 18px;
 }
 
-/* --- New Neon Glowing Classes --- */
+.footer-copy {
+  font-size: 0.68rem;
+  color: #444;
+  text-align: center;
+  margin-top: 12px;
+  user-select: none;
+}
+
+/* Neon Glowing Classes */
 .neon-green-text {
   color: #39ff14 !important;
   text-shadow: 0 0 4px rgba(57, 255, 20, 0.6), 0 0 8px rgba(57, 255, 20, 0.4);

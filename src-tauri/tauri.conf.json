@@ -1,6 +1,6 @@
 {
   "productName": "Ombracrypt",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "identifier": "com.abiswasdev.ombracrypt",
   "build": {
     "frontendDist": "../src"
@@ -9,18 +9,18 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Ombracrypt 1.0.0",
-        "width": 500,
-        "height": 860, 
+        "title": "Ombracrypt 1.1.0",
+        "width": 540,
+        "height": 760,
         "minWidth": 500,
-        "minHeight": 860,
-        "resizable": false,
+        "minHeight": 700,
+        "resizable": true,
         "maximizable": false,
         "fullscreen": false
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: http://asset.localhost; connect-src ipc: http://ipc.localhost",
       "capabilities": [
         {
           "identifier": "default-capabilities",
@@ -36,7 +36,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "shortDescription": "The zero-trust quantum vault.",
+    "shortDescription": "The zero-trust post-quantum vault.",
     "category": "Utility",
     "icon": [
       "icons/32x32.png",

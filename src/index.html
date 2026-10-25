@@ -16,22 +16,46 @@
       <p>The Zero-trust Quantum-safe vault</p>
     </div>
 
-    <!-- Manual File/Folder Selection -->
-      <div class="file-selection">
-        <div style="display: flex; gap: 10px; justify-content: center;">
-          <button type="button" id="encrypt-folder-btn" class="secondary-btn">Encrypt Folder</button>
-          <button type="button" id="decrypt-vault-btn" class="secondary-btn">Decrypt Vault</button>          
-        </div>
-        <p id="target-path-display">No target selected</p>
+    <!-- Mode Switcher Tabs -->
+    <div class="mode-tabs">
+      <button type="button" id="mode-encrypt-tab" class="tab-btn active-tab">Encrypt Mode</button>
+      <button type="button" id="mode-decrypt-tab" class="tab-btn">Decrypt Mode</button>
+    </div>
 
-        <!-- Hidden Key Selection (Only shows in Decrypt Mode) -->
-        <div id="key-selection" style="display: none; margin-top: 15px; border-top: 1px dashed #555; padding-top: 15px;">
-          <button type="button" id="select-key-btn" class="secondary-btn" style="background-color: #2d2d2d; border-color: #007acc;">Choose Key File (.obk)</button>
-          <p id="key-path-display">No key selected</p>
-        </div>
+    <!-- Path & Storage Configuration Panel -->
+    <div class="file-selection">
+      <div class="path-block">
+        <button type="button" id="select-source-btn" class="secondary-btn">1. Select Input Folder to Encrypt</button>
+        <p id="target-path-display" class="path-label">No source selected</p>
       </div>
-      
-    <!-- Encryption Options -->
+
+      <div class="path-block divider-top">
+        <button type="button" id="select-output-btn" class="secondary-btn">2. Select Vault Output Folder</button>
+        <p id="output-path-display" class="path-label">No output destination selected</p>
+      </div>
+
+      <div class="path-block divider-top">
+        <div id="key-mode-wrapper" class="input-group" style="margin-bottom: 8px; text-align: left;">
+          <label for="key-mode-select" class="neon-green-text">Key Handling Mode</label>
+          <select id="key-mode-select">
+            <option value="generate">Generate New Keypair (.obk + .obp)</option>
+            <option value="existing_obp">Seal with Existing Public Key (.obp)</option>
+          </select>
+        </div>
+
+        <button type="button" id="select-key-btn" class="secondary-btn key-btn-accent">
+          3. Select Folder to Save Keys (.obk / .obp)
+        </button>
+        <p id="key-path-display" class="path-label">No key location selected</p>
+      </div>
+
+      <!-- Live Disk Space & Collision Telemetry Badge -->
+      <div id="space-telemetry-box" class="telemetry-box" style="display: none;">
+        <span id="space-telemetry-text">Checking storage...</span>
+      </div>
+    </div>
+
+    <!-- Encryption Algorithm Options (Side-by-Side Grid) -->
     <div class="settings-group" id="settings-group">
       <div class="input-group">
         <label for="cipher-algo" class="neon-green-text">Cipher Algorithm</label>
@@ -41,68 +65,66 @@
         </select>
       </div>
 
-      <div class="input-group">
+      <div class="input-group" id="kem-algo-group">
         <label for="kem-algo" class="neon-green-text">KEM Algorithm</label>
         <select id="kem-algo">
-          <option value="xwing">X-Wing</option>
-          <option value="cypherpunk">Cypherpunk Max</option>
+          <option value="xwing">X-Wing (ML-KEM-768)</option>
+          <option value="cypherpunk">Cypherpunk (ML-KEM-1024)</option>
         </select>
       </div>
     </div>
 
     <!-- Authentication -->
     <form id="crypto-form">
-      
-      <!-- Master Password -->
-      <div class="input-group">        
-          <input id="main-pin" type="password" placeholder="Enter Master Password" required />
-          <!-- Password Strength Indicator -->
-          <div id="password-strength-container" style="display: none; height: 4px; background: #444; border-radius: 2px; margin-top: 5px;">
-             <div id="password-strength-bar" style="height: 100%; width: 0%; border-radius: 2px; transition: width 0.3s ease, background-color 0.3s ease;"></div>
+      <div class="password-grid">
+        <!-- Master Password -->
+        <div class="input-group">
+          <input id="main-pin" type="password" placeholder="Master Password" required />
+          <div id="password-strength-container" style="display: none; height: 3px; background: #444; border-radius: 2px; margin-top: 3px;">
+            <div id="password-strength-bar" style="height: 100%; width: 0%; border-radius: 2px; transition: width 0.3s ease, background-color 0.3s ease;"></div>
           </div>
           <small id="password-strength-text" style="display: none; font-weight: 600;"></small>
+        </div>
+
+        <!-- Confirm Password (Only visible in Encrypt mode) -->
+        <div class="input-group" id="confirm-password-group">
+          <input id="confirm-pin" type="password" placeholder="Confirm Password" required />
+          <small id="password-match-msg" style="font-weight: 600;"></small>
+        </div>
       </div>
 
-      <!-- Confirm Password (Only visible in Encrypt mode) -->
-      <div class="input-group" id="confirm-password-group">        
-        <input id="confirm-pin" type="password" placeholder="Confirm Master Password" required />
-        <small id="password-match-msg" style="font-weight: 600;"></small>
-      </div>
-
-      <!-- Hidden Deception-Passcode -->
-
+      <!-- Deception Passcode -->
       <details class="advanced-options" id="advanced-options">
-        <summary class="neon-green-text">Advanced Security Options</summary>
-        <div class="input-group advanced-group">
-          <input id="deception-passcode" type="password" placeholder="Set Deception Passcode (Optional)" />
-          <input id="confirm-deception-passcode" type="password" placeholder="Confirm Deception Passcode" />
+        <summary class="neon-green-text">Advanced Security Options (Duress Trapdoor)</summary>
+        <div class="advanced-group">
+          <div class="password-grid">
+            <input id="deception-passcode" type="password" placeholder="Deception Passcode" />
+            <input id="confirm-deception-passcode" type="password" placeholder="Confirm Deception" />
+          </div>
           <small id="deception-match-msg" style="font-weight: 600;"></small>
-          <small class="neon-green-text">Deploys deception protocol upon unauthorized access.</small>
+          <small class="neon-green-text">Silently scrambles .obk key file upon duress entry.</small>
         </div>
       </details>
 
       <button type="submit" id="action-btn">Lock Vault</button>
     </form>
 
-    <!-- Progress Bar (Hidden by default) -->
-    <div id="progress-container" style="display: none; width: 100%; margin-top: 15px;">
-      <!-- New Stats Row -->
-      <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 5px; color: var(--text-secondary);">
+    <!-- Progress Bar -->
+    <div id="progress-container" style="display: none; width: 100%; margin-top: 10px;">
+      <div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 4px; color: var(--text-secondary);">
         <span id="progress-percent">0%</span>
         <span id="progress-eta">Calculating ETA...</span>
       </div>
-      <!-- Existing Bar -->
       <div style="background-color: var(--panel-bg); border-radius: 4px; border: 1px solid var(--border); overflow: hidden;">
-        <div id="progress-bar" style="width: 0%; height: 10px; background-color: var(--accent); transition: width 0.1s linear;"></div>
+        <div id="progress-bar" style="width: 0%; height: 8px; background-color: var(--accent); transition: width 0.1s linear;"></div>
       </div>
     </div>
     <p id="status-msg"></p>
 
     <!-- Copyright Footer -->
-    <p style="font-size: 0.7rem; color: #444; text-align: center; margin-top: 25px; user-select: none;">
+    <p class="footer-copy">
       Copyright &copy; 2026 Abhishek Biswas (Ombraveil). All rights reserved.
     </p>
-
   </main>
 </body>
 
