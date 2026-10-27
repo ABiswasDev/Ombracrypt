@@ -1,8 +1,13 @@
 pub mod crypto;
 pub mod deception;
+pub mod fs_guard;
 pub mod pipeline;
+pub mod stream;
 
-use pipeline::SpaceAssessment;
+#[cfg(test)]
+mod tests;
+
+use fs_guard::SpaceAssessment;
 use tauri::AppHandle;
 use zeroize::Zeroizing;
 
@@ -13,7 +18,7 @@ async fn inspect_path_space(
     output_dir: String,
     key_dir_or_file: Option<String>,
 ) -> Result<SpaceAssessment, String> {
-    pipeline::assess_storage_and_paths(
+    fs_guard::assess_storage_and_paths(
         &mode,
         &source_path,
         &output_dir,
@@ -49,7 +54,8 @@ async fn process_cryptography(
     let deception_passcode_secure = Zeroizing::new(deception_passcode);
 
     if mode == "ENCRYPT" {
-        let key_loc = key_path.ok_or("Please select a destination folder or Public Key (.obp) file.")?;
+        let key_loc =
+            key_path.ok_or("Please select a destination folder or Public Key (.obp) file.")?;
         pipeline::encrypt_vault(
             &app,
             &target_path,

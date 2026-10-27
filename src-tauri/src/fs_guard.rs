@@ -1,0 +1,397 @@
+use fs2::available_space;
+use rand::{rngs::OsRng, RngCore};
+use serde::Serialize;
+use std::fs::{self, File};
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use zeroize::Zeroizing;
+
+use crate::crypto::{compute_obk_public_fingerprint, compute_obp_fingerprint};
+use crate::stream::{read_vault_uncompressed_size, CHUNK_SIZE};
+
+/// Maximum permissible size for an .obk or .obp file (8 KiB ceiling prevents OOM DoS)
+pub const MAX_KEY_FILE_BYTES: u64 = 8192;
+pub const MIN_KEY_FILE_BYTES: u64 = 64;
+
+#[derive(Serialize)]
+pub struct SpaceAssessment {
+    pub required_bytes: u64,
+    pub available_bytes: u64,
+    pub sufficient: bool,
+    pub conflict_error: Option<String>,
+    pub key_fingerprint: Option<String>,
+    pub summary: String,
+}
+
+/// Flushes directory metadata to disk/USB so newly committed files/folders appear immediately
+pub fn sync_parent_directory(dir: &Path) {
+    if let Ok(dir_handle) = File::open(dir) {
+        let _ = dir_handle.sync_all();
+    }
+}
+
+/// Generates a hidden, CSPRNG-unique staging path so concurrent operations never collide
+pub fn unique_staging_path(dir: &Path, base_filename: &str) -> PathBuf {
+    let mut rnd = [0u8; 6];
+    OsRng.fill_bytes(&mut rnd);
+    dir.join(format!(
+        ".{}.{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}.part",
+        base_filename, rnd[0], rnd[1], rnd[2], rnd[3], rnd[4], rnd[5]
+    ))
+}
+
+/// Creates a CSPRNG-unique extraction staging directory with restrictive 0700 permissions on Unix
+pub fn create_secure_staging_dir(out_dir: &Path, file_stem: &str) -> Result<PathBuf, String> {
+    let mut rnd = [0u8; 6];
+    OsRng.fill_bytes(&mut rnd);
+    let stage_dir = out_dir.join(format!(
+        ".ombracrypt_stage_{}_{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        file_stem, rnd[0], rnd[1], rnd[2], rnd[3], rnd[4], rnd[5]
+    ));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&stage_dir)
+            .map_err(|e| format!("Failed to create secure staging directory: {}", e))?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir(&stage_dir)
+            .map_err(|e| format!("Failed to create secure staging directory: {}", e))?;
+    }
+
+    Ok(stage_dir)
+}
+
+/// Reads an .obk or .obp key file only after enforcing strict minimum and maximum byte bounds
+pub fn read_bounded_key_file(path_str: &str, label: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+    let file = File::open(path_str)
+        .map_err(|_| format!("Authentication Error: {} could not be accessed.", label))?;
+    let meta = file
+        .metadata()
+        .map_err(|_| format!("Integrity Error: Failed to read {} metadata.", label))?;
+
+    if !meta.is_file() {
+        return Err(format!(
+            "Security Error: Selected {} is not a regular file.",
+            label
+        ));
+    }
+    let len = meta.len();
+    if !(MIN_KEY_FILE_BYTES..=MAX_KEY_FILE_BYTES).contains(&len) {
+        return Err(format!(
+            "Security Error: {} size ({} bytes) is outside valid key bounds.",
+            label, len
+        ));
+    }
+
+    let mut buf = Zeroizing::new(Vec::with_capacity(len as usize));
+    file.take(MAX_KEY_FILE_BYTES)
+        .read_to_end(&mut buf)
+        .map_err(|_| format!("Integrity Error: Failed to read {} stream.", label))?;
+    Ok(buf)
+}
+
+/// RAII Guard that automatically removes partial staging files on error or early return
+pub struct TempFileGuard {
+    paths: Vec<PathBuf>,
+    armed: bool,
+}
+
+impl TempFileGuard {
+    pub fn new(paths: Vec<PathBuf>) -> Self {
+        Self { paths, armed: true }
+    }
+    pub fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            for p in &self.paths {
+                let _ = fs::remove_file(p);
+            }
+        }
+    }
+}
+
+/// RAII Guard that automatically wipes the temporary extraction staging folder on decryption failure
+pub struct TempDirGuard {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl TempDirGuard {
+    pub fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+    pub fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        if self.armed && self.path.exists() {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
+/// Transactional Publication Guard: Atomically commits staged files without overwriting existing files,
+/// and rolls back all newly committed artifacts if any step in a multi-file commit fails.
+pub struct CommitRollbackGuard {
+    committed: Vec<PathBuf>,
+    armed: bool,
+}
+
+impl CommitRollbackGuard {
+    pub fn new() -> Self {
+        Self {
+            committed: Vec::new(),
+            armed: true,
+        }
+    }
+
+    pub fn commit_file(&mut self, part_path: &Path, final_path: &Path) -> Result<(), String> {
+        if final_path.exists() {
+            return Err(format!(
+                "Refusing to overwrite existing file: {}",
+                final_path.display()
+            ));
+        }
+
+        match fs::hard_link(part_path, final_path) {
+            Ok(()) => {
+                let _ = fs::remove_file(part_path);
+                self.committed.push(final_path.to_path_buf());
+                Ok(())
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(format!(
+                "Refusing to overwrite existing file: {}",
+                final_path.display()
+            )),
+            Err(_) => {
+                if final_path.exists() {
+                    return Err(format!(
+                        "Refusing to overwrite existing file: {}",
+                        final_path.display()
+                    ));
+                }
+                fs::rename(part_path, final_path).map_err(|e| {
+                    format!("Failed to commit artifact {}: {}", final_path.display(), e)
+                })?;
+                self.committed.push(final_path.to_path_buf());
+                Ok(())
+            }
+        }
+    }
+
+    pub fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for CommitRollbackGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            for p in &self.committed {
+                let _ = fs::remove_file(p);
+            }
+        }
+    }
+}
+
+/// Canonicalizes source and destination paths to ensure output/key folders are never inside the input folder
+pub fn verify_no_source_overlap(
+    source_dir: &Path,
+    dest_dir: &Path,
+    role_label: &str,
+) -> Result<(), String> {
+    let src_canon = fs::canonicalize(source_dir)
+        .map_err(|e| format!("Failed to resolve source path: {}", e))?;
+    let dst_canon = fs::canonicalize(dest_dir)
+        .map_err(|e| format!("Failed to resolve {} path: {}", role_label, e))?;
+
+    if src_canon.is_dir() && (dst_canon == src_canon || dst_canon.starts_with(&src_canon)) {
+        return Err(format!(
+            "{} folder cannot be the Input Folder itself or placed inside the Input Folder.",
+            role_label
+        ));
+    }
+    Ok(())
+}
+
+/// Recursively calculates total payload bytes and file count while rejecting symlinks
+pub fn calculate_dir_metrics(path: &Path) -> Result<(u64, u64), String> {
+    let meta = fs::symlink_metadata(path).map_err(|e| format!("Cannot access path: {}", e))?;
+    if meta.file_type().is_symlink() {
+        return Err(format!("Symlinks are restricted for security: {:?}", path));
+    }
+    if meta.is_file() {
+        return Ok((meta.len(), 1));
+    }
+    let mut total_bytes = 0u64;
+    let mut count = 1u64;
+    for entry in fs::read_dir(path).map_err(|e| format!("Failed to read directory: {}", e))? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let (b, c) = calculate_dir_metrics(&entry.path())?;
+        total_bytes = total_bytes.saturating_add(b);
+        count = count.saturating_add(c);
+    }
+    Ok((total_bytes, count))
+}
+
+/// Pre-flight capacity, canonical overlap, path collision, and Key ID fingerprint check
+pub fn assess_storage_and_paths(
+    mode: &str,
+    source_path: &str,
+    output_dir: &str,
+    key_dir_or_file: Option<&str>,
+) -> Result<SpaceAssessment, String> {
+    let src = Path::new(source_path);
+    let out = Path::new(output_dir);
+
+    if !src.exists() {
+        return Err("Selected source path does not exist.".to_string());
+    }
+    if !out.exists() || !out.is_dir() {
+        return Err("Selected output destination must be an existing directory.".to_string());
+    }
+
+    let avail = available_space(out)
+        .map_err(|e| format!("Failed to query destination free space: {}", e))?;
+
+    if mode == "ENCRYPT" {
+        let (raw_bytes, item_count) = calculate_dir_metrics(src)?;
+        let tar_overhead = item_count.saturating_mul(1024).saturating_add(2048);
+        let estimated_stream = raw_bytes.saturating_add(tar_overhead);
+        let chunks = (estimated_stream / (CHUNK_SIZE as u64)) + 1;
+        let required = estimated_stream
+            .saturating_add(chunks * 28)
+            .saturating_add(65_536);
+
+        let folder_name = src
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or("Invalid source folder name.")?;
+
+        let mut conflict = None;
+        let mut key_fingerprint = None;
+
+        if let Err(overlap_err) = verify_no_source_overlap(src, out, "Vault Output") {
+            conflict = Some(overlap_err);
+        }
+
+        if conflict.is_none() {
+            if let Some(k_path) = key_dir_or_file {
+                let kp = Path::new(k_path);
+                if kp.exists() && kp.is_dir() {
+                    if let Err(overlap_err) = verify_no_source_overlap(src, kp, "Key Output") {
+                        conflict = Some(overlap_err);
+                    }
+                } else if kp.exists() && kp.is_file() {
+                    match read_bounded_key_file(k_path, "Public Key (.obp)")
+                        .and_then(|bytes| compute_obp_fingerprint(&bytes))
+                    {
+                        Ok(fp) => key_fingerprint = Some(fp),
+                        Err(e) => conflict = Some(e),
+                    }
+                }
+            }
+        }
+
+        let target_obv = out.join(format!("{}.obv", folder_name));
+        if conflict.is_none() && target_obv.exists() {
+            conflict = Some(format!(
+                "Vault '{}' already exists in the output directory.",
+                target_obv.display()
+            ));
+        }
+
+        if conflict.is_none() {
+            if let Some(k_path) = key_dir_or_file {
+                let kp = Path::new(k_path);
+                if kp.is_dir() {
+                    let obk = kp.join(format!("{}.obk", folder_name));
+                    let obp = kp.join(format!("{}.obp", folder_name));
+                    if obk.exists() || obp.exists() {
+                        conflict = Some(format!(
+                            "Key file (.obk/.obp) for '{}' already exists in the selected key directory.",
+                            folder_name
+                        ));
+                    }
+                }
+            }
+        }
+
+        let sufficient = avail >= required;
+        let summary = format!(
+            "Required: {:.2} MB | Available: {:.2} MB",
+            required as f64 / 1_048_576.0,
+            avail as f64 / 1_048_576.0
+        );
+
+        Ok(SpaceAssessment {
+            required_bytes: required,
+            available_bytes: avail,
+            sufficient,
+            conflict_error: conflict,
+            key_fingerprint,
+            summary,
+        })
+    } else {
+        let uncompressed = read_vault_uncompressed_size(src)?;
+        let required = uncompressed.saturating_add(65_536);
+
+        let stem = src
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or("Invalid vault filename.")?;
+        let final_extract_dir = out.join(stem);
+        let mut conflict = if final_extract_dir.exists() {
+            Some(format!(
+                "Destination '{}' already exists in the output folder.",
+                final_extract_dir.display()
+            ))
+        } else {
+            None
+        };
+
+        let mut key_fingerprint = None;
+        if conflict.is_none() {
+            if let Some(k_path) = key_dir_or_file {
+                let kp = Path::new(k_path);
+                if kp.exists() && kp.is_file() {
+                    match read_bounded_key_file(k_path, "Private Key (.obk)")
+                        .and_then(|bytes| compute_obk_public_fingerprint(&bytes))
+                    {
+                        Ok(fp) => key_fingerprint = Some(fp),
+                        Err(e) => conflict = Some(e),
+                    }
+                }
+            }
+        }
+
+        let sufficient = avail >= required;
+        let summary = format!(
+            "Required: {:.2} MB | Available: {:.2} MB",
+            required as f64 / 1_048_576.0,
+            avail as f64 / 1_048_576.0
+        );
+
+        Ok(SpaceAssessment {
+            required_bytes: required,
+            available_bytes: avail,
+            sufficient,
+            conflict_error: conflict,
+            key_fingerprint,
+            summary,
+        })
+    }
+}

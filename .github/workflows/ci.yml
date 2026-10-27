@@ -1,0 +1,52 @@
+name: Ombracrypt Security & CI Suite
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-security-suite:
+    name: Rust Crypto & Pipeline Regression Tests
+    runs-on: ubuntu-22.04
+
+    defaults:
+      run:
+        working-directory: ./src-tauri
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Tauri v2 Linux System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Setup Rust Stable Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo Build Artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: Verify Compilation & Warnings
+        run: cargo check --all-targets
+
+      - name: Run 18-Test Security & Conformance Suite
+        run: cargo test --release -- --nocapture
