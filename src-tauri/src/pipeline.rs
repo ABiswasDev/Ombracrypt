@@ -1,5 +1,5 @@
 use rand::{rngs::OsRng, RngCore};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use tar::{Archive, Builder};
@@ -9,13 +9,13 @@ use zeroize::Zeroizing;
 use crate::crypto;
 use crate::deception;
 use crate::fs_guard::{
-    assess_storage_and_paths, calculate_dir_metrics, create_secure_staging_dir,
-    read_bounded_key_file, sync_parent_directory, unique_staging_path, verify_no_source_overlap,
-    CommitRollbackGuard, TempDirGuard, TempFileGuard,
+    assess_storage_and_paths, create_private_staging_file, create_public_staging_file,
+    create_secure_staging_dir, read_bounded_key_file, sync_parent_directory, unique_staging_path,
+    verify_no_source_overlap, CommitRollbackGuard, TempDirGuard, TempFileGuard,
 };
 use crate::stream::{
-    build_and_hash_header, emit_progress, parse_and_validate_header, sanitize_tar_path,
-    validate_tar_entry_type, ChunkedDecryptReader, ChunkedEncryptWriter, CHUNK_SIZE,
+    build_and_hash_header, emit_progress, extract_tar_archive_safely, parse_and_validate_header,
+    ChunkedDecryptReader, ChunkedEncryptWriter, CHUNK_SIZE,
 };
 
 /// Standalone helper to generate a reusable Group/Individual Keypair (.obp Public + .obk Private)
@@ -53,20 +53,12 @@ pub fn generate_standalone_keypair(
     let (obp_bytes, obk_bytes, _) = crypto::generate_keypair_blobs(kem, deception_passcode)?;
     let key_fp = crypto::compute_obp_fingerprint(&obp_bytes)?;
 
-    let mut obp_file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&obp_part)
-        .map_err(|e| format!("Failed to create staged .obp file: {}", e))?;
+    let mut obp_file = create_public_staging_file(&obp_part)?;
     obp_file.write_all(&obp_bytes).map_err(|e| e.to_string())?;
     obp_file.sync_all().map_err(|e| e.to_string())?;
     drop(obp_file);
 
-    let mut obk_file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&obk_part)
-        .map_err(|e| format!("Failed to create staged .obk file: {}", e))?;
+    let mut obk_file = create_private_staging_file(&obk_part)?;
     obk_file.write_all(&obk_bytes).map_err(|e| e.to_string())?;
     obk_file.sync_all().map_err(|e| e.to_string())?;
     drop(obk_file);
@@ -123,6 +115,15 @@ pub fn encrypt_vault_core(
 ) -> Result<String, String> {
     emit_progress(app, 5)?;
 
+    let (cipher_id, nonce_len) = match cipher {
+        "xchacha20" => (1u8, 24usize),
+        "aes256gcm" => (2u8, 12usize),
+        _ => return Err(format!("Security Error: Unsupported cipher algorithm '{}'.", cipher)),
+    };
+    if !use_existing_public_key && kem != "xwing" && kem != "cypherpunk" {
+        return Err(format!("Security Error: Unsupported KEM algorithm '{}'.", kem));
+    }
+
     let target_path_obj = Path::new(target_path);
     let vault_out_obj = Path::new(vault_output_dir);
 
@@ -145,9 +146,9 @@ pub fn encrypt_vault_core(
         .and_then(|n| n.to_str())
         .ok_or("Failed to resolve source folder name.")?;
 
-    let (uncompressed_bytes, item_count) = calculate_dir_metrics(target_path_obj)?;
+    let uncompressed_bytes = check.raw_bytes;
     let estimated_tar_size = uncompressed_bytes
-        .saturating_add(item_count.saturating_mul(512))
+        .saturating_add(check.item_count.saturating_mul(512))
         .max(1024);
 
     emit_progress(app, 15)?;
@@ -169,15 +170,8 @@ pub fn encrypt_vault_core(
 
     let final_master_key = crypto::compute_master_key(&argon_key, &ss_bytes, &salt)?;
 
-    let (cipher_id, nonce_bytes) = if cipher == "aes256gcm" {
-        let mut n = vec![0u8; 12];
-        OsRng.fill_bytes(&mut n);
-        (2u8, n)
-    } else {
-        let mut n = vec![0u8; 24];
-        OsRng.fill_bytes(&mut n);
-        (1u8, n)
-    };
+    let mut nonce_bytes = vec![0u8; nonce_len];
+    OsRng.fill_bytes(&mut nonce_bytes);
 
     let obv_final = vault_out_obj.join(format!("{}.obv", folder_name));
     let obv_part = unique_staging_path(vault_out_obj, &format!("{}.obv", folder_name));
@@ -205,19 +199,11 @@ pub fn encrypt_vault_core(
     if let (Some((obp_bytes, obk_bytes)), Some((ref obk_part, _, ref obp_part, _))) =
         (generated_keys, &key_targets)
     {
-        let mut obk_file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(obk_part)
-            .map_err(|e| format!("Failed to stage private key (.obk): {}", e))?;
+        let mut obk_file = create_private_staging_file(obk_part)?;
         obk_file.write_all(&obk_bytes).map_err(|e| e.to_string())?;
         obk_file.sync_all().map_err(|e| e.to_string())?;
 
-        let mut obp_file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(obp_part)
-            .map_err(|e| format!("Failed to stage public key (.obp): {}", e))?;
+        let mut obp_file = create_public_staging_file(obp_part)?;
         obp_file.write_all(&obp_bytes).map_err(|e| e.to_string())?;
         obp_file.sync_all().map_err(|e| e.to_string())?;
     }
@@ -231,11 +217,7 @@ pub fn encrypt_vault_core(
         &ct_bytes,
     );
 
-    let mut vault_file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&obv_part)
-        .map_err(|e| format!("Failed to create staged vault file: {}", e))?;
+    let mut vault_file = create_public_staging_file(&obv_part)?;
     vault_file
         .write_all(&header_bytes)
         .map_err(|e| e.to_string())?;
@@ -283,7 +265,7 @@ pub fn encrypt_vault_core(
     commit_guard.disarm();
     stage_guard.disarm();
 
-    emit_progress(app, 100)?;
+    let _ = emit_progress(app, 100);
     if use_existing_public_key {
         Ok(format!(
             "Operation Successful: Vault sealed (.obv) with Public Key [Key ID: {}].",
@@ -395,45 +377,10 @@ pub fn decrypt_vault_core(
     };
 
     let mut archive = Archive::new(decrypt_reader);
-    let entries = archive
-        .entries()
-        .map_err(|e| format!("Failed to read encrypted archive stream: {}", e))?;
-
     let max_permitted_bytes = header.uncompressed_bytes.saturating_add(1024 * 1024);
-    let mut extracted_bytes = 0u64;
 
-    for entry_res in entries {
-        let mut entry = entry_res.map_err(|e| e.to_string())?;
-        let entry_type = entry.header().entry_type();
-
-        validate_tar_entry_type(entry_type)?;
-
-        let entry_size = entry.header().size().unwrap_or(0);
-        extracted_bytes = extracted_bytes.saturating_add(entry_size);
-        if extracted_bytes > max_permitted_bytes {
-            return Err(
-                "Security Error: Archive payload exceeds authenticated header size limit."
-                    .to_string(),
-            );
-        }
-
-        let raw_path = entry.path().map_err(|e| e.to_string())?.into_owned();
-        let clean_rel = sanitize_tar_path(&raw_path)?;
-        if clean_rel.as_os_str().is_empty() {
-            continue;
-        }
-        let dest_path = stage_dir.join(clean_rel);
-        if entry_type.is_dir() {
-            fs::create_dir_all(&dest_path).map_err(|e| e.to_string())?;
-        } else {
-            if let Some(parent) = dest_path.parent() {
-                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            entry
-                .unpack(&dest_path)
-                .map_err(|e| format!("Failed to unpack file: {}", e))?;
-        }
-    }
+    // Sprint 6 Fix: Isolated extraction with duplicate-path & suid/permission sanitization
+    extract_tar_archive_safely(&mut archive, &stage_dir, max_permitted_bytes)?;
 
     let mut reader = archive.into_inner();
     let mut drain = [0u8; 1024];
@@ -457,6 +404,6 @@ pub fn decrypt_vault_core(
     sync_parent_directory(out_dir_obj);
     dir_guard.disarm();
 
-    emit_progress(app, 100)?;
+    let _ = emit_progress(app, 100);
     Ok("Operation Successful: Vault authenticated and extracted directly in memory.".to_string())
 }

@@ -93,7 +93,7 @@ pub fn compute_hybrid_combiner(
     hybrid_ss
 }
 
-/// Computes a human-verifiable SHA-256 fingerprint (XXXX-XXXX-XXXX-XXXX) of a canonical .obp Public Key
+/// Computes a 128-bit human-verifiable SHA-256 fingerprint (XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX) of a canonical .obp Public Key
 pub fn compute_obp_fingerprint(obp_bytes: &[u8]) -> Result<String, String> {
     if obp_bytes.len() < 6 + 32 || &obp_bytes[..5] != OBP_MAGIC {
         return Err("Invalid Public Key (.obp): Unrecognized header or corrupted file.".to_string());
@@ -112,15 +112,18 @@ pub fn compute_obp_fingerprint(obp_bytes: &[u8]) -> Result<String, String> {
 
     let mut hasher = Sha256::new();
     hasher.update(obp_bytes);
-    let digest = hasher.finalize();
+    let d = hasher.finalize();
 
     Ok(format!(
-        "{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}",
-        digest[0], digest[1], digest[2], digest[3], digest[4], digest[5], digest[6], digest[7]
+        "{:02X}{:02X}{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}",
+        d[0], d[1], d[2], d[3],
+        d[4], d[5], d[6], d[7],
+        d[8], d[9], d[10], d[11],
+        d[12], d[13], d[14], d[15]
     ))
 }
 
-/// Reconstructs the public key components from an .obk Private Key to compute its matching Key ID fingerprint
+/// Reconstructs the public key components from an .obk Private Key to compute its matching 128-bit Key ID fingerprint
 pub fn compute_obk_public_fingerprint(obk_bytes: &[u8]) -> Result<String, String> {
     if obk_bytes.len() < 6 + 16 + 32 + 32 || &obk_bytes[..5] != OBK_MAGIC {
         return Err(
@@ -281,41 +284,95 @@ pub fn generate_keypair_blobs(
     kem_choice: &str,
     deception_passcode: &str,
 ) -> Result<(Vec<u8>, Zeroizing<Vec<u8>>, u8), String> {
-    if kem_choice != "cypherpunk" {
-        let mut xwing_seed = Zeroizing::new([0u8; 32]);
-        OsRng.fill_bytes(&mut *xwing_seed);
-        return generate_xwing_keypair_from_seed(&xwing_seed, deception_passcode);
+    match kem_choice {
+        "xwing" => {
+            let mut xwing_seed = Zeroizing::new([0u8; 32]);
+            OsRng.fill_bytes(&mut *xwing_seed);
+            generate_xwing_keypair_from_seed(&xwing_seed, deception_passcode)
+        }
+        "cypherpunk" => {
+            let x25519_sk = StaticSecret::random_from_rng(OsRng);
+            let x25519_pk = PublicKey::from(&x25519_sk);
+
+            let (ek, dk) = ml_kem_1024::KG::try_keygen()
+                .map_err(|_| "FIPS 203 ML-KEM-1024 key generation failed.".to_string())?;
+            let mlkem_ek_bytes = ek.into_bytes().to_vec();
+            let mlkem_dk_bytes = Zeroizing::new(dk.into_bytes().to_vec());
+            let kem_id = 2u8;
+
+            let mut obp_bytes = Vec::with_capacity(6 + mlkem_ek_bytes.len() + 32);
+            obp_bytes.extend_from_slice(OBP_MAGIC);
+            obp_bytes.push(kem_id);
+            obp_bytes.extend_from_slice(&mlkem_ek_bytes);
+            obp_bytes.extend_from_slice(x25519_pk.as_bytes());
+
+            let mut duress_salt = [0u8; 16];
+            OsRng.fill_bytes(&mut duress_salt);
+            let phantom_block = generate_phantom_block(deception_passcode, &duress_salt)?;
+
+            let mut obk_bytes =
+                Zeroizing::new(Vec::with_capacity(6 + 16 + mlkem_dk_bytes.len() + 32 + 32));
+            obk_bytes.extend_from_slice(OBK_MAGIC);
+            obk_bytes.push(kem_id);
+            obk_bytes.extend_from_slice(&duress_salt);
+            obk_bytes.extend_from_slice(&mlkem_dk_bytes);
+            let x25519_sk_bytes = Zeroizing::new(x25519_sk.to_bytes());
+            obk_bytes.extend_from_slice(&*x25519_sk_bytes);
+            obk_bytes.extend_from_slice(&phantom_block);
+
+            Ok((obp_bytes, obk_bytes, kem_id))
+        }
+        _ => Err(format!("Security Error: Unsupported KEM algorithm '{}'.", kem_choice)),
+    }
+}
+
+/// Deterministic X-Wing encapsulation from a 64-byte ephemeral seed (32B ML-KEM m || 32B X25519 ek)
+pub fn encapsulate_xwing_deterministic(
+    obp_bytes: &[u8],
+    ephemeral_seed: &[u8; 64],
+) -> Result<(Vec<u8>, Zeroizing<[u8; 32]>), String> {
+    if obp_bytes.len() != 6 + ml_kem_768::EK_LEN + 32 || &obp_bytes[..5] != OBP_MAGIC || obp_bytes[5] != 1 {
+        return Err("Invalid X-Wing Public Key (.obp) for deterministic encapsulation.".to_string());
     }
 
-    let x25519_sk = StaticSecret::random_from_rng(OsRng);
-    let x25519_pk = PublicKey::from(&x25519_sk);
+    let key_body = &obp_bytes[6..];
+    let mlkem_ek_slice = &key_body[..ml_kem_768::EK_LEN];
+    let x25519_pk_slice = &key_body[ml_kem_768::EK_LEN..];
 
-    let (ek, dk) = ml_kem_1024::KG::try_keygen()
-        .map_err(|_| "FIPS 203 ML-KEM-1024 key generation failed.".to_string())?;
-    let mlkem_ek_bytes = ek.into_bytes().to_vec();
-    let mlkem_dk_bytes = Zeroizing::new(dk.into_bytes().to_vec());
-    let kem_id = 2u8;
+    let mut recipient_pk_arr = [0u8; 32];
+    recipient_pk_arr.copy_from_slice(x25519_pk_slice);
+    let recipient_x25519_pk = PublicKey::from(recipient_pk_arr);
 
-    let mut obp_bytes = Vec::with_capacity(6 + mlkem_ek_bytes.len() + 32);
-    obp_bytes.extend_from_slice(OBP_MAGIC);
-    obp_bytes.push(kem_id);
-    obp_bytes.extend_from_slice(&mlkem_ek_bytes);
-    obp_bytes.extend_from_slice(x25519_pk.as_bytes());
+    let mut eph_sk_arr = Zeroizing::new([0u8; 32]);
+    eph_sk_arr.copy_from_slice(&ephemeral_seed[32..64]);
+    let ephemeral_sk = StaticSecret::from(*eph_sk_arr);
+    let ephemeral_pk = PublicKey::from(&ephemeral_sk);
+    let x25519_ss = ephemeral_sk.diffie_hellman(&recipient_x25519_pk);
 
-    let mut duress_salt = [0u8; 16];
-    OsRng.fill_bytes(&mut duress_salt);
-    let phantom_block = generate_phantom_block(deception_passcode, &duress_salt)?;
+    let ek_arr: [u8; ml_kem_768::EK_LEN] = mlkem_ek_slice
+        .try_into()
+        .map_err(|_| "Invalid ML-KEM-768 public key length.".to_string())?;
+    let ek = ml_kem_768::EncapsKey::try_from_bytes(ek_arr)
+        .map_err(|_| "Invalid ML-KEM-768 encapsulation key.".to_string())?;
 
-    let mut obk_bytes = Zeroizing::new(Vec::with_capacity(6 + 16 + mlkem_dk_bytes.len() + 32 + 32));
-    obk_bytes.extend_from_slice(OBK_MAGIC);
-    obk_bytes.push(kem_id);
-    obk_bytes.extend_from_slice(&duress_salt);
-    obk_bytes.extend_from_slice(&mlkem_dk_bytes);
-    let x25519_sk_bytes = Zeroizing::new(x25519_sk.to_bytes());
-    obk_bytes.extend_from_slice(&*x25519_sk_bytes);
-    obk_bytes.extend_from_slice(&phantom_block);
+    let mut mlkem_rng = SliceRng::new(&ephemeral_seed[..32]);
+    let (ssk, ct) = ek
+        .try_encaps_with_rng(&mut mlkem_rng)
+        .map_err(|_| "ML-KEM-768 deterministic encapsulation failed.".to_string())?;
+    let mlkem_ss_bytes = Zeroizing::new(ssk.into_bytes());
 
-    Ok((obp_bytes, obk_bytes, kem_id))
+    let hybrid_ss = compute_hybrid_combiner(
+        &*mlkem_ss_bytes,
+        x25519_ss.as_bytes(),
+        ephemeral_pk.as_bytes(),
+        recipient_x25519_pk.as_bytes(),
+        XWING_LABEL,
+    );
+
+    let mut combined_ct = ct.into_bytes().to_vec();
+    combined_ct.extend_from_slice(ephemeral_pk.as_bytes());
+
+    Ok((combined_ct, hybrid_ss))
 }
 
 /// Encapsulates a hybrid shared secret against a serialized .obp Public Key using the X-Wing SHA3-256 combiner

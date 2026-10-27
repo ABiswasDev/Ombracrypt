@@ -4,12 +4,13 @@ use aes_gcm::{
 };
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use sha2::{Digest, Sha256};
-use std::fs::File;
+use std::collections::HashSet;
+use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
-use tar::EntryType;
+use tar::{Archive, EntryType};
 use tauri::{AppHandle, Emitter};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::crypto;
 
@@ -40,6 +41,12 @@ pub fn emit_progress(app: Option<&AppHandle>, progress: u8) -> Result<(), String
             .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// Overwrites all active plaintext bytes in the vector with zeroes before resetting length to 0
+pub fn clear_and_zeroize_buffer(buf: &mut Zeroizing<Vec<u8>>) {
+    buf.as_mut_slice().zeroize();
+    buf.clear();
 }
 
 /// Serializes the OMBV\x02 header and computes its SHA-256 digest for AEAD AAD binding
@@ -87,7 +94,6 @@ pub fn parse_and_validate_header(vault_file: &mut File) -> Result<ValidatedHeade
     let p_cost = u32::from_le_bytes(fixed_prefix[15..19].try_into().unwrap());
     let uncompressed_bytes = u64::from_le_bytes(fixed_prefix[19..27].try_into().unwrap());
 
-    // Sprint 1 Fix: Reject untrusted/oversized Argon2id parameters before KDF execution (DoS Shield)
     if m_cost != crypto::ARGON2_M_COST
         || t_cost != crypto::ARGON2_T_COST
         || p_cost != crypto::ARGON2_P_COST
@@ -102,7 +108,6 @@ pub fn parse_and_validate_header(vault_file: &mut File) -> Result<ValidatedHeade
     salt.copy_from_slice(&fixed_prefix[27..43]);
     let nonce_len = fixed_prefix[43] as usize;
 
-    // Sprint 1 Fix: Strictly bind cipher_id to its exact required nonce length so AEAD never panics
     let valid_cipher_nonce =
         (cipher_id == 1 && nonce_len == 24) || (cipher_id == 2 && nonce_len == 12);
     if !valid_cipher_nonce {
@@ -112,7 +117,6 @@ pub fn parse_and_validate_header(vault_file: &mut File) -> Result<ValidatedHeade
         );
     }
 
-    // Sprint 1 Fix: Strictly validate kem_id before reading ciphertext
     let expected_ct_len = match kem_id {
         1 => XWING_CT_LEN,
         2 => CYPHERPUNK_CT_LEN,
@@ -199,7 +203,7 @@ pub fn sanitize_tar_path(entry_path: &Path) -> Result<PathBuf, String> {
     Ok(clean)
 }
 
-/// Sprint 1 Fix: Strict allowlist for TAR entry types (Regular Files and Directories only)
+/// Strict allowlist for TAR entry types (Regular Files and Directories only)
 pub fn validate_tar_entry_type(entry_type: EntryType) -> Result<(), String> {
     match entry_type {
         EntryType::Regular | EntryType::Directory => Ok(()),
@@ -208,6 +212,91 @@ pub fn validate_tar_entry_type(entry_type: EntryType) -> Result<(), String> {
             entry_type
         )),
     }
+}
+
+/// Sprint 6 Fix: Safely extracts a TAR stream while blocking duplicate paths, entry collisions,
+/// oversized payloads, xattrs, and setuid/setgid/sticky permission bits.
+pub fn extract_tar_archive_safely<R: Read>(
+    archive: &mut Archive<R>,
+    stage_dir: &Path,
+    max_permitted_bytes: u64,
+) -> Result<(), String> {
+    let entries = archive
+        .entries()
+        .map_err(|e| format!("Failed to read encrypted archive stream: {}", e))?;
+
+    let mut extracted_bytes = 0u64;
+    let mut seen_paths: HashSet<PathBuf> = HashSet::new();
+
+    for entry_res in entries {
+        let mut entry = entry_res.map_err(|e| e.to_string())?;
+        let entry_type = entry.header().entry_type();
+
+        validate_tar_entry_type(entry_type)?;
+
+        let entry_size = entry.header().size().unwrap_or(0);
+        extracted_bytes = extracted_bytes.saturating_add(entry_size);
+        if extracted_bytes > max_permitted_bytes {
+            return Err(
+                "Security Error: Archive payload exceeds authenticated header size limit."
+                    .to_string(),
+            );
+        }
+
+        let raw_path = entry.path().map_err(|e| e.to_string())?.into_owned();
+        let clean_rel = sanitize_tar_path(&raw_path)?;
+        if clean_rel.as_os_str().is_empty() {
+            continue;
+        }
+
+        // Reject duplicate relative paths inside the same archive
+        if !seen_paths.insert(clean_rel.clone()) {
+            return Err(format!(
+                "Security Error: Archive contains duplicate or conflicting entry path ({:?}).",
+                clean_rel
+            ));
+        }
+
+        let dest_path = stage_dir.join(&clean_rel);
+        if entry_type.is_dir() {
+            if dest_path.exists() && !dest_path.is_dir() {
+                return Err(format!(
+                    "Security Error: Directory entry conflicts with existing file ({:?}).",
+                    clean_rel
+                ));
+            }
+            fs::create_dir_all(&dest_path).map_err(|e| e.to_string())?;
+        } else {
+            if dest_path.exists() {
+                return Err(format!(
+                    "Security Error: File entry conflicts with existing path ({:?}).",
+                    clean_rel
+                ));
+            }
+            if let Some(parent) = dest_path.parent() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+
+            // Never restore untrusted OS permissions (suid/sgid) or extended attributes
+            entry.set_preserve_permissions(false);
+            entry.set_unpack_xattrs(false);
+
+            entry
+                .unpack(&dest_path)
+                .map_err(|e| format!("Failed to unpack file: {}", e))?;
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(meta) = fs::symlink_metadata(&dest_path) {
+                    let safe_mode = meta.permissions().mode() & 0o0777;
+                    let _ = fs::set_permissions(&dest_path, fs::Permissions::from_mode(safe_mode));
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Custom In-Memory Streaming AEAD Writer (Zero .tmp.tar written to disk)
@@ -274,7 +363,7 @@ impl<'a, W: Write> ChunkedEncryptWriter<'a, W> {
         self.processed_bytes = self
             .processed_bytes
             .saturating_add(self.buffer.len() as u64);
-        self.buffer.clear();
+        clear_and_zeroize_buffer(&mut self.buffer);
         self.chunk_index += 1;
 
         let ratio = (self.processed_bytes as f64 / self.total_expected.max(1) as f64).min(1.0);
@@ -333,6 +422,8 @@ pub struct ChunkedDecryptReader<'a, R: Read> {
 
 impl<'a, R: Read> ChunkedDecryptReader<'a, R> {
     fn load_next_chunk(&mut self) -> std::io::Result<bool> {
+        clear_and_zeroize_buffer(&mut self.buffer);
+
         if self.reached_final_chunk {
             return Ok(false);
         }
@@ -437,6 +528,9 @@ impl<'a, R: Read> ChunkedDecryptReader<'a, R> {
 
 impl<'a, R: Read> Read for ChunkedDecryptReader<'a, R> {
     fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        if out.is_empty() {
+            return Ok(0);
+        }
         if self.read_pos >= self.buffer.len() {
             let has_more = self.load_next_chunk()?;
             if !has_more {

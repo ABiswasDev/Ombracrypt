@@ -614,7 +614,7 @@ fn test_sprint3_obp_and_obk_fingerprints_match_identically() {
             "Public (.obp) and Private (.obk) key fingerprints must match for profile {}",
             profile
         );
-        assert_eq!(fp_pub.len(), 19); // Format: XXXX-XXXX-XXXX-XXXX
+        assert_eq!(fp_pub.len(), 35); // 128-bit format: XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX
     }
 }
 
@@ -662,5 +662,314 @@ fn test_sprint4_truncated_vault_ciphertext_rejected_and_cleaned() {
     assert!(
         fs::read_dir(&out_dir).unwrap().next().is_none(),
         "Staging directory must be wiped when truncation is detected"
+    );
+}
+
+// =========================================================================
+// SPRINT 5 MEMORY HYGIENE, 0600 PERMISSIONS & DURESS HARDENING TESTS
+// =========================================================================
+
+#[cfg(unix)]
+#[test]
+fn test_sprint5_obk_file_created_with_0600_owner_only_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+    let (ws, _guard) = create_test_workspace("obk_perms");
+    let src_dir = ws.join("data");
+    let vault_dir = ws.join("vault");
+    let key_dir = ws.join("keys");
+
+    for d in [&src_dir, &vault_dir, &key_dir] {
+        fs::create_dir_all(d).unwrap();
+    }
+    fs::write(src_dir.join("secret.txt"), b"perm check").unwrap();
+
+    encrypt_vault_core(
+        None,
+        src_dir.to_str().unwrap(),
+        vault_dir.to_str().unwrap(),
+        key_dir.to_str().unwrap(),
+        false,
+        "xchacha20",
+        "xwing",
+        "Pass1234",
+        "",
+    )
+    .unwrap();
+
+    let obk_meta = fs::metadata(key_dir.join("data.obk")).unwrap();
+    assert_eq!(
+        obk_meta.permissions().mode() & 0o777,
+        0o600,
+        "Private key (.obk) must have strict 0600 owner-only permissions"
+    );
+}
+
+#[test]
+fn test_sprint5_plaintext_buffer_zeroized_before_clear() {
+    let mut buf = zeroize::Zeroizing::new(vec![0xAAu8; 64]);
+    let ptr = buf.as_ptr();
+    let cap = buf.capacity();
+    assert!(cap >= 64);
+
+    crate::stream::clear_and_zeroize_buffer(&mut buf);
+    assert_eq!(buf.len(), 0);
+
+    // Inspect underlying allocated capacity to confirm bytes were overwritten with 0x00 before clear()
+    let raw_capacity_slice = unsafe { std::slice::from_raw_parts(ptr, 64) };
+    assert!(
+        raw_capacity_slice.iter().all(|&b| b == 0),
+        "Underlying vector capacity must be zeroed out before length is cleared"
+    );
+}
+
+#[test]
+fn test_sprint5_decrypt_reader_empty_slice_read_does_not_advance_stream() {
+    use std::io::{Cursor, Read};
+    let mut reader = crate::stream::ChunkedDecryptReader {
+        inner: Cursor::new(vec![0xFFu8; 128]),
+        cipher_id: 1,
+        master_key: zeroize::Zeroizing::new([0u8; 32]),
+        base_nonce: vec![0u8; 24],
+        header_hash: [0u8; 32],
+        buffer: zeroize::Zeroizing::new(Vec::new()),
+        read_pos: 0,
+        chunk_index: 0,
+        bytes_read_from_vault: 0,
+        vault_body_size: 128,
+        reached_final_chunk: false,
+        app: None,
+        last_percent: 40,
+    };
+
+    let mut empty_buf: [u8; 0] = [];
+    let n = reader.read(&mut empty_buf).expect("Empty read must succeed");
+    assert_eq!(n, 0);
+    assert_eq!(
+        reader.chunk_index, 0,
+        "Empty buffer read must not consume chunks"
+    );
+    assert_eq!(reader.bytes_read_from_vault, 0);
+}
+
+#[test]
+fn test_sprint5_unknown_cipher_and_kem_rejected_explicitly() {
+    let (ws, _guard) = create_test_workspace("unknown_algos");
+    let src_dir = ws.join("data");
+    let out_dir = ws.join("out");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::create_dir_all(&out_dir).unwrap();
+    fs::write(src_dir.join("f.txt"), b"test").unwrap();
+
+    let bad_cipher = encrypt_vault_core(
+        None,
+        src_dir.to_str().unwrap(),
+        out_dir.to_str().unwrap(),
+        out_dir.to_str().unwrap(),
+        false,
+        "aes128_unknown",
+        "xwing",
+        "Pass123",
+        "",
+    );
+    assert!(bad_cipher.is_err());
+    assert!(bad_cipher.unwrap_err().contains("Unsupported cipher"));
+
+    let bad_kem = encrypt_vault_core(
+        None,
+        src_dir.to_str().unwrap(),
+        out_dir.to_str().unwrap(),
+        out_dir.to_str().unwrap(),
+        false,
+        "xchacha20",
+        "rsa2048_unknown",
+        "Pass123",
+        "",
+    );
+    assert!(bad_kem.is_err());
+    assert!(bad_kem.unwrap_err().contains("Unsupported KEM"));
+}
+
+#[test]
+fn test_sprint5_duress_scramble_rejects_symlinks_and_oversized_targets() {
+    let (ws, _guard) = create_test_workspace("duress_guards");
+    let huge_file = ws.join("huge.obk");
+    fs::write(&huge_file, vec![0x41u8; (MAX_KEY_FILE_BYTES as usize) + 50]).unwrap();
+
+    let res_huge = crate::deception::scramble_key_file_verified(huge_file.to_str().unwrap());
+    assert!(res_huge.is_err(), "Duress scramble must reject oversized files");
+
+    #[cfg(unix)]
+    {
+        let target_file = ws.join("real_target.txt");
+        let symlink_path = ws.join("symlink.obk");
+        fs::write(&target_file, vec![0x42u8; 256]).unwrap();
+        std::os::unix::fs::symlink(&target_file, &symlink_path).unwrap();
+
+        let res_sym = crate::deception::scramble_key_file_verified(symlink_path.to_str().unwrap());
+        assert!(res_sym.is_err(), "Duress scramble must reject symlinks");
+        assert_eq!(
+            fs::read(&target_file).unwrap(),
+            vec![0x42u8; 256],
+            "Symlink target must remain untouched"
+        );
+    }
+}
+
+// =========================================================================
+// SPRINT 6 OFFICIAL NIST/IETF KAT VECTORS & HOSTILE TAR ISOLATION TESTS
+// =========================================================================
+
+#[test]
+fn test_sprint6_nist_fips202_and_rfc7748_official_kat_vectors() {
+    use sha3::digest::{ExtendableOutput, Update, XofReader};
+    use sha3::{Digest, Sha3_256, Shake256};
+    use x25519_dalek::{PublicKey, StaticSecret};
+
+    // 1. Official NIST FIPS 202 KAT Vector: SHA3-256("abc")
+    let digest_abc = Sha3_256::digest(b"abc");
+    let expected_sha3_abc: [u8; 32] = [
+        0x3a, 0x98, 0x5d, 0xa7, 0x4f, 0xe2, 0x25, 0xb2, 0x04, 0x5c, 0x17, 0x2d, 0x6b, 0xd3, 0x90,
+        0xbd, 0x85, 0x5f, 0x08, 0x6e, 0x3e, 0x9d, 0x52, 0x5b, 0x46, 0xbf, 0xe2, 0x45, 0x11, 0x43,
+        0x15, 0x32,
+    ];
+    assert_eq!(digest_abc.as_slice(), &expected_sha3_abc);
+
+    // 2. Official NIST FIPS 202 KAT Vector: SHAKE256("", 32)
+    let mut shake = Shake256::default();
+    shake.update(b"");
+    let mut xof = shake.finalize_xof();
+    let mut shake_out = [0u8; 32];
+    xof.read(&mut shake_out);
+    let expected_shake_empty: [u8; 32] = [
+        0x46, 0xb9, 0xdd, 0x2b, 0x0b, 0xa8, 0x8d, 0x13, 0x23, 0x3b, 0x3f, 0xeb, 0x74, 0x3e, 0xeb,
+        0x24, 0x3f, 0xcd, 0x52, 0xea, 0x62, 0xb8, 0x1b, 0x82, 0xb5, 0x0c, 0x27, 0x64, 0x6e, 0xd5,
+        0x76, 0x2f,
+    ];
+    assert_eq!(shake_out, expected_shake_empty);
+
+    // 3. Official IETF RFC 7748 §6.1 X25519 Diffie-Hellman KAT Vector
+    let alice_sk_bytes: [u8; 32] = [
+        0x77, 0x07, 0x6d, 0x0a, 0x73, 0x18, 0xa5, 0x7d, 0x3c, 0x16, 0xc1, 0x72, 0x51, 0xb2, 0x66,
+        0x45, 0xdf, 0x4c, 0x2f, 0x87, 0xeb, 0xc0, 0x99, 0x2a, 0xb1, 0x77, 0xfb, 0xa5, 0x1d, 0xb9,
+        0x2c, 0x2a,
+    ];
+    let bob_sk_bytes: [u8; 32] = [
+        0x5d, 0xab, 0x08, 0x7e, 0x62, 0x4a, 0x8a, 0x4b, 0x79, 0xe1, 0x7f, 0x8b, 0x83, 0x80, 0x0e,
+        0xe6, 0x6f, 0x3b, 0xb1, 0x29, 0x26, 0x18, 0xb6, 0xfd, 0x1c, 0x2f, 0x8b, 0x27, 0xff, 0x88,
+        0xe0, 0xeb,
+    ];
+    let expected_shared_secret: [u8; 32] = [
+        0x4a, 0x5d, 0x9d, 0x5b, 0xa4, 0xce, 0x2d, 0xe1, 0x72, 0x8e, 0x3b, 0xf4, 0x80, 0x35, 0x0f,
+        0x25, 0xe0, 0x7e, 0x21, 0xc9, 0x47, 0xd1, 0x9e, 0x33, 0x76, 0xf0, 0x9b, 0x3c, 0x1e, 0x16,
+        0x17, 0x42,
+    ];
+
+    let alice_sk = StaticSecret::from(alice_sk_bytes);
+    let bob_sk = StaticSecret::from(bob_sk_bytes);
+    let bob_pk = PublicKey::from(&bob_sk);
+    let shared = alice_sk.diffie_hellman(&bob_pk);
+    assert_eq!(shared.as_bytes(), &expected_shared_secret);
+}
+
+#[test]
+fn test_sprint6_xwing_deterministic_encaps_decaps_and_implicit_rejection() {
+    let key_seed = [0x11u8; 32];
+    let ephem_seed = [0x22u8; 64];
+
+    let (obp, obk, _) = crate::crypto::generate_xwing_keypair_from_seed(&key_seed, "").unwrap();
+    let (ct1, ss1) = crate::crypto::encapsulate_xwing_deterministic(&obp, &ephem_seed).unwrap();
+    let (ct2, ss2) = crate::crypto::encapsulate_xwing_deterministic(&obp, &ephem_seed).unwrap();
+
+    assert_eq!(ct1, ct2, "Deterministic X-Wing encapsulation must produce identical ciphertext");
+    assert_eq!(*ss1, *ss2, "Deterministic X-Wing encapsulation must produce identical shared secret");
+
+    // Verify decapsulation recovers the exact shared secret
+    let (duress, decaps_ss) =
+        crate::crypto::decapsulate_with_obk(1, &obk, &ct1, "MasterPass").unwrap();
+    assert!(!duress);
+    assert_eq!(*decaps_ss.unwrap(), *ss1);
+
+    // FIPS 203 Implicit Rejection check: corrupt 1 byte in ML-KEM-768 ciphertext
+    let mut tampered_ct = ct1.clone();
+    tampered_ct[0] ^= 0xFF;
+    let (_, rejected_ss) =
+        crate::crypto::decapsulate_with_obk(1, &obk, &tampered_ct, "MasterPass").unwrap();
+    assert_ne!(
+        *rejected_ss.unwrap(),
+        *ss1,
+        "Corrupted ML-KEM ciphertext must trigger implicit rejection and yield a different shared secret"
+    );
+}
+
+#[test]
+fn test_sprint6_duplicate_tar_entry_paths_rejected() {
+    use std::io::Cursor;
+    use tar::{Builder, Header};
+
+    let (ws, _guard) = create_test_workspace("dup_tar");
+    let mut tar_bytes = Vec::new();
+    {
+        let mut builder = Builder::new(&mut tar_bytes);
+        let data1 = b"first version";
+        let mut h1 = Header::new_gnu();
+        h1.set_size(data1.len() as u64);
+        h1.set_entry_type(EntryType::Regular);
+        h1.set_mode(0o644);
+        h1.set_cksum();
+        builder
+            .append_data(&mut h1, "nested/dup.txt", &data1[..])
+            .unwrap();
+
+        let data2 = b"second version attempting overwrite";
+        let mut h2 = Header::new_gnu();
+        h2.set_size(data2.len() as u64);
+        h2.set_entry_type(EntryType::Regular);
+        h2.set_mode(0o644);
+        h2.set_cksum();
+        builder
+            .append_data(&mut h2, "nested/dup.txt", &data2[..])
+            .unwrap();
+        builder.finish().unwrap();
+    }
+
+    let mut archive = tar::Archive::new(Cursor::new(tar_bytes));
+    let res = crate::stream::extract_tar_archive_safely(&mut archive, &ws, 1024 * 1024);
+    assert!(res.is_err(), "Duplicate TAR paths must be rejected");
+    assert!(res.unwrap_err().contains("duplicate or conflicting"));
+}
+
+#[cfg(unix)]
+#[test]
+fn test_sprint6_malicious_tar_setuid_and_setgid_bits_stripped() {
+    use std::io::Cursor;
+    use std::os::unix::fs::PermissionsExt;
+    use tar::{Builder, Header};
+
+    let (ws, _guard) = create_test_workspace("suid_tar");
+    let mut tar_bytes = Vec::new();
+    {
+        let mut builder = Builder::new(&mut tar_bytes);
+        let payload = b"#!/bin/sh\necho pwned\n";
+        let mut header = Header::new_gnu();
+        header.set_size(payload.len() as u64);
+        header.set_entry_type(EntryType::Regular);
+        // Set malicious setuid (0o4000) + setgid (0o2000) + sticky (0o1000) + 0o777 bits
+        header.set_mode(0o7777);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, "bin/suid_binary", &payload[..])
+            .unwrap();
+        builder.finish().unwrap();
+    }
+
+    let mut archive = tar::Archive::new(Cursor::new(tar_bytes));
+    crate::stream::extract_tar_archive_safely(&mut archive, &ws, 1024 * 1024)
+        .expect("Extraction should succeed while stripping privileged bits");
+
+    let meta = fs::metadata(ws.join("bin/suid_binary")).unwrap();
+    assert_eq!(
+        meta.permissions().mode() & 0o7000,
+        0,
+        "setuid, setgid, and sticky bits (0o7000) must be completely stripped upon extraction"
     );
 }

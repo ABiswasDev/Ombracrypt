@@ -1,7 +1,7 @@
 use fs2::available_space;
 use rand::{rngs::OsRng, RngCore};
 use serde::Serialize;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use zeroize::Zeroizing;
@@ -17,6 +17,8 @@ pub const MIN_KEY_FILE_BYTES: u64 = 64;
 pub struct SpaceAssessment {
     pub required_bytes: u64,
     pub available_bytes: u64,
+    pub raw_bytes: u64,
+    pub item_count: u64,
     pub sufficient: bool,
     pub conflict_error: Option<String>,
     pub key_fingerprint: Option<String>,
@@ -38,6 +40,28 @@ pub fn unique_staging_path(dir: &Path, base_filename: &str) -> PathBuf {
         ".{}.{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}.part",
         base_filename, rnd[0], rnd[1], rnd[2], rnd[3], rnd[4], rnd[5]
     ))
+}
+
+/// Creates a staging file for private keys (.obk) with strict 0600 (owner-only) permissions on Unix
+pub fn create_private_staging_file(path: &Path) -> Result<File, String> {
+    let mut opts = OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(path)
+        .map_err(|e| format!("Failed to create private key staging file: {}", e))
+}
+
+/// Creates a standard exclusive staging file for public keys (.obp) and encrypted vaults (.obv)
+pub fn create_public_staging_file(path: &Path) -> Result<File, String> {
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|e| format!("Failed to create staging file: {}", e))
 }
 
 /// Creates a CSPRNG-unique extraction staging directory with restrictive 0700 permissions on Unix
@@ -340,6 +364,8 @@ pub fn assess_storage_and_paths(
         Ok(SpaceAssessment {
             required_bytes: required,
             available_bytes: avail,
+            raw_bytes,
+            item_count,
             sufficient,
             conflict_error: conflict,
             key_fingerprint,
@@ -388,6 +414,8 @@ pub fn assess_storage_and_paths(
         Ok(SpaceAssessment {
             required_bytes: required,
             available_bytes: avail,
+            raw_bytes: uncompressed,
+            item_count: 0,
             sufficient,
             conflict_error: conflict,
             key_fingerprint,
