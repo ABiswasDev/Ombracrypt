@@ -118,7 +118,6 @@ pub fn encrypt_vault_core(
     deception_passcode: &str,
     cancellation_token: Option<Arc<AtomicBool>>,
 ) -> Result<String, String> {
-    // Sprint 8 Backend Invariant Verification
     if main_pin.trim().is_empty() {
         return Err("Security Error: Master Password cannot be empty or whitespace only.".to_string());
     }
@@ -249,21 +248,57 @@ pub fn encrypt_vault_core(
         total_expected: estimated_tar_size,
         app,
         last_percent: 30,
-        cancellation_token,
+        cancellation_token: cancellation_token.clone(),
     };
 
     let mut tar_builder = Builder::new(encrypt_writer);
     tar_builder.follow_symlinks(false);
-    tar_builder
-        .append_dir_all(".", target_path_obj)
-        .map_err(|e| format!("Failed to stream folder into encrypted archive: {}", e))?;
 
-    let encrypt_writer = tar_builder
-        .into_inner()
-        .map_err(|e| format!("Failed to finalize TAR stream: {}", e))?;
-    let vault_file = encrypt_writer
-        .finalize()
-        .map_err(|e| format!("Failed to finalize encrypted stream: {}", e))?;
+    if let Err(e) = tar_builder.append_dir_all(".", target_path_obj) {
+        if let Some(ref token) = cancellation_token {
+            if token.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err("Operation aborted by user.".to_string());
+            }
+        }
+        let s = e.to_string();
+        if s.contains("Operation aborted by user") {
+            return Err("Operation aborted by user.".to_string());
+        }
+        return Err(format!("Failed to stream folder into encrypted archive: {}", s));
+    }
+
+    let encrypt_writer = match tar_builder.into_inner() {
+        Ok(w) => w,
+        Err(e) => {
+            if let Some(ref token) = cancellation_token {
+                if token.load(std::sync::atomic::Ordering::Relaxed) {
+                    return Err("Operation aborted by user.".to_string());
+                }
+            }
+            let s = e.to_string();
+            if s.contains("Operation aborted by user") {
+                return Err("Operation aborted by user.".to_string());
+            }
+            return Err(format!("Failed to finalize TAR stream: {}", s));
+        }
+    };
+
+    let vault_file = match encrypt_writer.finalize() {
+        Ok(f) => f,
+        Err(e) => {
+            if let Some(ref token) = cancellation_token {
+                if token.load(std::sync::atomic::Ordering::Relaxed) {
+                    return Err("Operation aborted by user.".to_string());
+                }
+            }
+            let s = e.to_string();
+            if s.contains("Operation aborted by user") {
+                return Err("Operation aborted by user.".to_string());
+            }
+            return Err(format!("Failed to finalize encrypted stream: {}", s));
+        }
+    };
+
     vault_file.sync_all().map_err(|e| e.to_string())?;
     drop(vault_file);
 
@@ -397,17 +432,47 @@ pub fn decrypt_vault_core(
         reached_final_chunk: false,
         app,
         last_percent: 40,
-        cancellation_token,
+        cancellation_token: cancellation_token.clone(),
     };
 
     let mut archive = Archive::new(decrypt_reader);
     let max_permitted_bytes = header.uncompressed_bytes.saturating_add(1024 * 1024);
 
-    extract_tar_archive_safely(&mut archive, &stage_dir, max_permitted_bytes)?;
+    if let Err(e) = extract_tar_archive_safely(&mut archive, &stage_dir, max_permitted_bytes) {
+        if let Some(ref token) = cancellation_token {
+            if token.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err("Operation aborted by user.".to_string());
+            }
+        }
+        if e.contains("Operation aborted by user") {
+            return Err("Operation aborted by user.".to_string());
+        }
+        return Err(e);
+    }
 
     let mut reader = archive.into_inner();
     let mut drain = [0u8; 1024];
-    while reader.read(&mut drain).map_err(|e| e.to_string())? > 0 {}
+    while match reader.read(&mut drain) {
+        Ok(n) => n > 0,
+        Err(e) => {
+            if let Some(ref token) = cancellation_token {
+                if token.load(std::sync::atomic::Ordering::Relaxed) {
+                    return Err("Operation aborted by user.".to_string());
+                }
+            }
+            let s = e.to_string();
+            if s.contains("Operation aborted by user") {
+                return Err("Operation aborted by user.".to_string());
+            }
+            return Err(s);
+        }
+    } {}
+
+    if let Some(ref token) = cancellation_token {
+        if token.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err("Operation aborted by user.".to_string());
+        }
+    }
 
     if !reader.reached_final_chunk {
         return Err(

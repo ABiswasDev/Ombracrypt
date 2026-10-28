@@ -222,16 +222,28 @@ pub fn extract_tar_archive_safely<R: Read>(
     stage_dir: &Path,
     max_permitted_bytes: u64,
 ) -> Result<(), String> {
-    let entries = archive
-        .entries()
-        .map_err(|e| format!("Failed to read encrypted archive stream: {}", e))?;
+    let entries = archive.entries().map_err(|e| {
+        let s = e.to_string();
+        if s.contains("Operation aborted by user") {
+            "Operation aborted by user.".to_string()
+        } else {
+            format!("Failed to read encrypted archive stream: {}", s)
+        }
+    })?;
 
     let mut extracted_bytes = 0u64;
     let mut seen_paths: HashSet<PathBuf> = HashSet::new();
     const MAX_ARCHIVE_ENTRIES: usize = 50_000;
 
     for entry_res in entries {
-        let mut entry = entry_res.map_err(|e| e.to_string())?;
+        let mut entry = entry_res.map_err(|e| {
+            let s = e.to_string();
+            if s.contains("Operation aborted by user") {
+                "Operation aborted by user.".to_string()
+            } else {
+                e.to_string()
+            }
+        })?;
         let entry_type = entry.header().entry_type();
 
         validate_tar_entry_type(entry_type)?;
@@ -313,9 +325,14 @@ pub fn extract_tar_archive_safely<R: Read>(
             entry.set_preserve_permissions(false);
             entry.set_unpack_xattrs(false);
 
-            entry
-                .unpack(&dest_path)
-                .map_err(|e| format!("Failed to unpack file: {}", e))?;
+            // Intercept mid-stream unpack cancellation errors cleanly
+            if let Err(e) = entry.unpack(&dest_path) {
+                let s = e.to_string();
+                if s.contains("Operation aborted by user") {
+                    return Err("Operation aborted by user.".to_string());
+                }
+                return Err(format!("Failed to unpack file: {}", s));
+            }
 
             #[cfg(unix)]
             {

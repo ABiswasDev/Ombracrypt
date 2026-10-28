@@ -566,7 +566,7 @@ fn test_sprint3_xwing_shake256_deterministic_keygen_and_vectors() {
     assert_eq!(
         &obk1[22..obk1.len() - 32],
         &obk2[22..obk2.len() - 32],
-        "Deterministic X-Wing seed must produce identical ML-KEM-768 + X25519 secret keys"
+        "Deterministic X-Wing seed must produce identical seed payload"
     );
 }
 
@@ -1108,4 +1108,137 @@ fn test_sprint8_tar_bomb_excessive_directory_depth_rejected() {
     let res = crate::stream::extract_tar_archive_safely(&mut archive, &ws, 1024 * 1024);
     assert!(res.is_err(), "Excessive path depth (>64) must be rejected");
     assert!(res.unwrap_err().contains("path depth exceeds maximum safety limit"));
+}
+
+// =========================================================================
+// SPRINT 9 CANONICAL X-WING SPECIFICATION KAT & DECRYPTION CANCEL TESTS
+// =========================================================================
+
+#[test]
+fn test_sprint9_canonical_xwing_obk_86_bytes_and_seed_decapsulation() {
+    let (obp_bytes, obk_bytes, kem_id) =
+        crate::crypto::generate_keypair_blobs("xwing", "DuressTest123").unwrap();
+
+    assert_eq!(kem_id, 1);
+    // Canonical X-Wing Profile 1: 5B magic + 1B kem_id + 16B salt + 32B seed + 32B phantom block = 86 bytes
+    assert_eq!(
+        obk_bytes.len(),
+        86,
+        "Canonical X-Wing .obk private key must be exactly 86 bytes (32-byte seed representation)"
+    );
+
+    // .obp Public Key: 5B magic + 1B kem_id + 1184B ML-KEM-768 ek + 32B X25519 pk = 1222 bytes
+    assert_eq!(
+        obp_bytes.len(),
+        1222,
+        "X-Wing .obp public key must be exactly 1222 bytes"
+    );
+
+    // Public and Private key fingerprints must match
+    let pub_fp = crate::crypto::compute_obp_fingerprint(&obp_bytes).unwrap();
+    let priv_fp = crate::crypto::compute_obk_public_fingerprint(&obk_bytes).unwrap();
+    assert_eq!(pub_fp, priv_fp);
+
+    // Deterministic encapsulation & decapsulation
+    let (ct, ss_enc, _) = crate::crypto::encapsulate_with_obp(&obp_bytes).unwrap();
+    assert_eq!(ct.len(), 1088 + 32); // 1120 bytes
+    assert_eq!(ss_enc.len(), 32);
+
+    let (duress, ss_dec_opt) =
+        crate::crypto::decapsulate_with_obk(1, &obk_bytes, &ct, "MasterPass").unwrap();
+    assert!(!duress);
+    assert_eq!(*ss_dec_opt.unwrap(), *ss_enc);
+
+    // Trigger duress on the 86-byte key
+    let (duress_triggered, _) =
+        crate::crypto::decapsulate_with_obk(1, &obk_bytes, &ct, "DuressTest123").unwrap();
+    assert!(duress_triggered, "Duress trapdoor must trigger on matching duress passcode");
+}
+
+#[test]
+fn test_sprint9_xwing_combiner_specification_kat() {
+    use sha3::{Digest, Sha3_256};
+
+    let mlkem_ss = [0x5Au8; 32];
+    let x25519_ss = [0xA5u8; 32];
+    let ct_x = [0x3Cu8; 32];
+    let pk_x = [0xC3u8; 32];
+
+    // Draft specification §5: ss = SHA3-256(ss_m || ss_x || ct_x || pk_x || "\.//^\")
+    let mut expected_input = Vec::with_capacity(32 + 32 + 32 + 32 + 6);
+    expected_input.extend_from_slice(&mlkem_ss);
+    expected_input.extend_from_slice(&x25519_ss);
+    expected_input.extend_from_slice(&ct_x);
+    expected_input.extend_from_slice(&pk_x);
+    expected_input.extend_from_slice(b"\\.//^\\"); // Official 6-byte ASCII domain separator
+
+    let expected_ss = Sha3_256::digest(&expected_input);
+
+    let actual_ss = crate::crypto::compute_hybrid_combiner(
+        &mlkem_ss,
+        &x25519_ss,
+        &ct_x,
+        &pk_x,
+        crate::crypto::XWING_LABEL,
+    );
+
+    assert_eq!(
+        actual_ss.as_slice(),
+        expected_ss.as_slice(),
+        "Combiner output must match official draft-connolly-cfrg-xwing-kem SHA3-256 concatenation vector"
+    );
+}
+
+#[test]
+fn test_sprint9_decryption_cancellation_sanitized_message() {
+    let (ws, _guard) = create_test_workspace("decrypt_cancel");
+    let src_dir = ws.join("src");
+    let vault_dir = ws.join("vault");
+    let key_dir = ws.join("keys");
+    let extract_dir = ws.join("out");
+
+    for d in [&src_dir, &vault_dir, &key_dir, &extract_dir] {
+        fs::create_dir_all(d).unwrap();
+    }
+    fs::write(src_dir.join("data.bin"), vec![0x42u8; CHUNK_SIZE * 2]).unwrap();
+
+    encrypt_vault_core(
+        None,
+        src_dir.to_str().unwrap(),
+        vault_dir.to_str().unwrap(),
+        key_dir.to_str().unwrap(),
+        false,
+        "xchacha20",
+        "xwing",
+        "MasterPass123!",
+        "",
+        None,
+    )
+    .unwrap();
+
+    let obv_path = vault_dir.join("src.obv");
+    let obk_path = key_dir.join("src.obk");
+
+    let cancel_flag = Arc::new(AtomicBool::new(true)); // Pre-tripped cancellation
+    let res = decrypt_vault_core(
+        None,
+        obv_path.to_str().unwrap(),
+        Some(obk_path.to_str().unwrap()),
+        extract_dir.to_str().unwrap(),
+        "MasterPass123!",
+        Some(cancel_flag),
+    );
+
+    assert!(res.is_err());
+    let err_msg = res.unwrap_err();
+    assert_eq!(
+        err_msg, "Operation aborted by user.",
+        "Decryption cancel must return concise sanitized error"
+    );
+
+    assert_eq!(
+        fs::read_dir(&extract_dir).unwrap().count(),
+        0,
+        "Extraction directory must be left completely empty upon cancellation"
+    );
 }
