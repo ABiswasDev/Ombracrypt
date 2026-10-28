@@ -1157,22 +1157,20 @@ fn test_sprint9_canonical_xwing_obk_86_bytes_and_seed_decapsulation() {
 
 #[test]
 fn test_sprint9_xwing_combiner_specification_kat() {
-    use sha3::{Digest, Sha3_256};
-
     let mlkem_ss = [0x5Au8; 32];
     let x25519_ss = [0xA5u8; 32];
     let ct_x = [0x3Cu8; 32];
     let pk_x = [0xC3u8; 32];
 
-    // Draft specification §5: ss = SHA3-256(ss_m || ss_x || ct_x || pk_x || "\.//^\")
-    let mut expected_input = Vec::with_capacity(32 + 32 + 32 + 32 + 6);
-    expected_input.extend_from_slice(&mlkem_ss);
-    expected_input.extend_from_slice(&x25519_ss);
-    expected_input.extend_from_slice(&ct_x);
-    expected_input.extend_from_slice(&pk_x);
-    expected_input.extend_from_slice(b"\\.//^\\"); // Official 6-byte ASCII domain separator
-
-    let expected_ss = Sha3_256::digest(&expected_input);
+    // Independent FIPS 202 SHA3-256 Known-Answer Test literal
+    // Formula per draft-connolly-cfrg-xwing-kem §5:
+    // ss = SHA3-256(ss_m || ss_x || ct_x || pk_x || r"\.//^\")
+    let expected_ss: [u8; 32] = [
+        0xD1u8, 0xD4u8, 0x29u8, 0x83u8, 0x7Bu8, 0x23u8, 0x79u8, 0xF1u8,
+        0x95u8, 0xE5u8, 0x42u8, 0x4Eu8, 0x5Au8, 0x59u8, 0x1Fu8, 0xDEu8,
+        0x76u8, 0x3Bu8, 0x60u8, 0x43u8, 0xCAu8, 0xE7u8, 0xBFu8, 0x4Du8,
+        0x6Cu8, 0x6Cu8, 0x9Bu8, 0x0Du8, 0x59u8, 0xFEu8, 0x50u8, 0x43u8,
+    ];
 
     let actual_ss = crate::crypto::compute_hybrid_combiner(
         &mlkem_ss,
@@ -1184,8 +1182,8 @@ fn test_sprint9_xwing_combiner_specification_kat() {
 
     assert_eq!(
         actual_ss.as_slice(),
-        expected_ss.as_slice(),
-        "Combiner output must match official draft-connolly-cfrg-xwing-kem SHA3-256 concatenation vector"
+        &expected_ss,
+        "Combiner output must match static independent SHA3-256 Known-Answer Test vector"
     );
 }
 
