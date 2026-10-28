@@ -26,6 +26,7 @@ const settingsGroup = document.getElementById("settings-group");
 const kemAlgoGroup = document.getElementById("kem-algo-group");
 const advancedOptions = document.getElementById("advanced-options");
 const actionBtn = document.getElementById("action-btn");
+const cancelCleanBtn = document.getElementById("cancel-clean-btn");
 
 // --- Password Validation Elements ---
 const mainPinInput = document.getElementById("main-pin");
@@ -55,12 +56,32 @@ let outputDir = null;
 let keyPath = null;
 let storageCheckPassed = false;
 let streamStartTime = 0;
+let isOperationRunning = false;
 
 // --- Mode Switching Logic ---
 modeEncryptTab.addEventListener("click", () => switchMode("ENCRYPT"));
 modeDecryptTab.addEventListener("click", () => switchMode("DECRYPT"));
 
+function updateCancelCleanButtonUI() {
+  if (!cancelCleanBtn) return;
+  if (isOperationRunning) {
+    cancelCleanBtn.style.display = "block";
+    cancelCleanBtn.textContent = "Cancel Operation & Clean";
+    cancelCleanBtn.className = "cancel-clean-btn cancel-active";
+    cancelCleanBtn.disabled = false;
+  } else if (outputDir || keyPath) {
+    cancelCleanBtn.style.display = "block";
+    cancelCleanBtn.textContent = "Clean Temporary Staging in Selected Folder";
+    cancelCleanBtn.className = "cancel-clean-btn idle-clean";
+    cancelCleanBtn.disabled = false;
+  } else {
+    cancelCleanBtn.style.display = "none";
+  }
+}
+
 function switchMode(newMode) {
+  if (isOperationRunning) return;
+
   currentMode = newMode;
   targetPath = null;
   outputDir = null;
@@ -74,11 +95,12 @@ function switchMode(newMode) {
   statusMsg.textContent = "";
   actionBtn.disabled = false;
 
-  // FIX: Hide leftover progress bar from previous Encrypt/Decrypt run
   progressContainer.style.display = "none";
   progressBar.style.width = "0%";
   if (progressPercent) progressPercent.textContent = "0%";
   if (progressEta) progressEta.textContent = "";
+
+  updateCancelCleanButtonUI();
 
   if (currentMode === "ENCRYPT") {
     modeEncryptTab.classList.add("active-tab");
@@ -93,7 +115,8 @@ function switchMode(newMode) {
     confirmGroup.style.display = "flex";
     confirmPinInput.required = true;
     actionBtn.textContent = "Lock Vault";
-    actionBtn.style.backgroundColor = "var(--accent)";
+    actionBtn.style.background = "linear-gradient(135deg, #0284c7 0%, #38bdf8 100%)";
+    actionBtn.style.color = "#04101e";
   } else {
     modeDecryptTab.classList.add("active-tab");
     modeEncryptTab.classList.remove("active-tab");
@@ -111,7 +134,8 @@ function switchMode(newMode) {
     strengthText.style.display = "none";
 
     actionBtn.textContent = "Unlock Vault";
-    actionBtn.style.backgroundColor = "#28a745";
+    actionBtn.style.background = "linear-gradient(135deg, #059669 0%, #34d399 100%)";
+    actionBtn.style.color = "#04101e";
   }
 }
 
@@ -120,14 +144,15 @@ keyModeSelect.addEventListener("change", () => {
   keyPath = null;
   keyDisplay.textContent = "No key location selected";
   updateKeyModeUI();
+  updateCancelCleanButtonUI();
   runPreFlightSpaceCheck();
 });
 
 function updateKeyModeUI() {
   if (keyModeSelect.value === "existing_obp") {
     selectKeyBtn.textContent = "3. Select Public Sealing Key (.obp)";
-    kemAlgoGroup.style.display = "none"; // KEM is determined by the .obp file
-    advancedOptions.style.display = "none"; // Duress block lives inside .obk
+    kemAlgoGroup.style.display = "none";
+    advancedOptions.style.display = "none";
   } else {
     selectKeyBtn.textContent = "3. Select Folder to Save Keys (.obk / .obp)";
     kemAlgoGroup.style.display = "flex";
@@ -137,6 +162,7 @@ function updateKeyModeUI() {
 
 // --- Path Selector Button Handlers ---
 selectSourceBtn.addEventListener("click", async () => {
+  if (isOperationRunning) return;
   if (currentMode === "ENCRYPT") {
     const selected = await open({
       multiple: false,
@@ -164,6 +190,7 @@ selectSourceBtn.addEventListener("click", async () => {
 });
 
 selectOutputBtn.addEventListener("click", async () => {
+  if (isOperationRunning) return;
   const selected = await open({
     multiple: false,
     directory: true,
@@ -175,11 +202,13 @@ selectOutputBtn.addEventListener("click", async () => {
   if (selected) {
     outputDir = selected;
     outputDisplay.textContent = outputDir;
+    updateCancelCleanButtonUI();
     await runPreFlightSpaceCheck();
   }
 });
 
 selectKeyBtn.addEventListener("click", async () => {
+  if (isOperationRunning) return;
   if (currentMode === "ENCRYPT" && keyModeSelect.value === "generate") {
     const selected = await open({
       multiple: false,
@@ -189,6 +218,7 @@ selectKeyBtn.addEventListener("click", async () => {
     if (selected) {
       keyPath = selected;
       keyDisplay.textContent = keyPath;
+      updateCancelCleanButtonUI();
       await runPreFlightSpaceCheck();
     }
   } else if (currentMode === "ENCRYPT" && keyModeSelect.value === "existing_obp") {
@@ -201,6 +231,7 @@ selectKeyBtn.addEventListener("click", async () => {
     if (selected) {
       keyPath = selected;
       keyDisplay.textContent = keyPath;
+      updateCancelCleanButtonUI();
       await runPreFlightSpaceCheck();
     }
   } else {
@@ -213,6 +244,7 @@ selectKeyBtn.addEventListener("click", async () => {
     if (selected) {
       keyPath = selected;
       keyDisplay.textContent = keyPath;
+      updateCancelCleanButtonUI();
       await runPreFlightSpaceCheck();
     }
   }
@@ -249,7 +281,10 @@ async function runPreFlightSpaceCheck() {
       actionBtn.disabled = true;
       storageCheckPassed = false;
     } else {
-      spaceTelemetryText.textContent = `Storage Verified ✓ (${report.summary})`;
+      const fpBadge = report.key_fingerprint
+        ? ` | Key ID: ${report.key_fingerprint}`
+        : "";
+      spaceTelemetryText.textContent = `Storage Verified ✓ (${report.summary}${fpBadge})`;
       spaceTelemetryBox.className = "telemetry-box telemetry-ok";
       actionBtn.disabled = false;
       storageCheckPassed = true;
@@ -261,6 +296,47 @@ async function runPreFlightSpaceCheck() {
     storageCheckPassed = false;
   }
 }
+
+// --- Cancel & Scoped Clean Button Handler ---
+cancelCleanBtn.addEventListener("click", async () => {
+  if (isOperationRunning) {
+    try {
+      statusMsg.textContent = "Canceling operation and purging staging artifacts...";
+      statusMsg.style.color = "#f87171";
+      cancelCleanBtn.disabled = true;
+      await invoke("cancel_current_operation");
+    } catch (err) {
+      statusMsg.textContent = "Cancellation error: " + err;
+      statusMsg.style.color = "#f87171";
+    }
+  } else {
+    const targetDirs = [];
+    if (outputDir) targetDirs.push(outputDir);
+    if (keyPath) {
+      const pathStr = keyPath.toString();
+      if (pathStr.endsWith(".obk") || pathStr.endsWith(".obp")) {
+        const lastSlash = Math.max(pathStr.lastIndexOf('/'), pathStr.lastIndexOf('\\'));
+        if (lastSlash > 0) targetDirs.push(pathStr.substring(0, lastSlash));
+      } else {
+        targetDirs.push(keyPath);
+      }
+    }
+
+    if (targetDirs.length === 0) return;
+
+    try {
+      statusMsg.textContent = "Scanning selected folders for abandoned staging files...";
+      statusMsg.style.color = "var(--text-secondary)";
+      const res = await invoke("clean_staging_artifacts", { paths: targetDirs });
+      statusMsg.textContent = res;
+      statusMsg.style.color = "#38bdf8";
+      await runPreFlightSpaceCheck();
+    } catch (err) {
+      statusMsg.textContent = "Cleaner error: " + err;
+      statusMsg.style.color = "#f87171";
+    }
+  }
+});
 
 // --- Real-time Password Validation Logic ---
 mainPinInput.addEventListener("input", () => {
@@ -296,19 +372,19 @@ function checkPasswordStrength(password) {
 
   if (strength <= 2) {
     strengthBar.style.width = "33%";
-    strengthBar.style.backgroundColor = "#ff4444";
+    strengthBar.style.backgroundColor = "#f87171";
     strengthText.textContent = "Strength: Weak";
-    strengthText.style.color = "#ff4444";
+    strengthText.style.color = "#f87171";
   } else if (strength === 3 || strength === 4) {
     strengthBar.style.width = "66%";
-    strengthBar.style.backgroundColor = "#ffbb33";
+    strengthBar.style.backgroundColor = "#fbbf24";
     strengthText.textContent = "Strength: Moderate";
-    strengthText.style.color = "#ffbb33";
+    strengthText.style.color = "#fbbf24";
   } else {
     strengthBar.style.width = "100%";
-    strengthBar.style.backgroundColor = "#00C851";
-    strengthText.textContent = "Strength: Strong";
-    strengthText.style.color = "#00C851";
+    strengthBar.style.backgroundColor = "#38bdf8";
+    strengthText.textContent = "Strength: Spectral Shield (Strong)";
+    strengthText.style.color = "#7dd3fc";
   }
 }
 
@@ -323,10 +399,10 @@ function checkPasswordMatch() {
 
   if (p1 === p2) {
     matchMsg.textContent = "Passwords match ✓";
-    matchMsg.style.color = "#00C851";
+    matchMsg.style.color = "#38bdf8";
   } else {
     matchMsg.textContent = "Passwords do not match ✗";
-    matchMsg.style.color = "#ff4444";
+    matchMsg.style.color = "#f87171";
   }
 }
 
@@ -342,7 +418,7 @@ function checkDeceptionValidation() {
 
   if (d1 && masterPin && d1 === masterPin) {
     deceptionMatchMsg.textContent = "Passcode cannot match Master Password ✗";
-    deceptionMatchMsg.style.color = "#ff4444";
+    deceptionMatchMsg.style.color = "#f87171";
     return;
   }
 
@@ -353,17 +429,17 @@ function checkDeceptionValidation() {
 
   if (d1 === d2) {
     deceptionMatchMsg.textContent = "Deception passcodes match ✓";
-    deceptionMatchMsg.style.color = "#00C851";
+    deceptionMatchMsg.style.color = "#38bdf8";
   } else {
     deceptionMatchMsg.textContent = "Deception passcodes do not match ✗";
-    deceptionMatchMsg.style.color = "#ff4444";
+    deceptionMatchMsg.style.color = "#f87171";
   }
 }
 
 deceptionInput.addEventListener("input", checkDeceptionValidation);
 confirmDeceptionInput.addEventListener("input", checkDeceptionValidation);
 
-// --- Bridge to Rust Backend & In-Memory Streaming ETA Logic ---
+// --- Bridge to Rust Backend & Progress Reporting ---
 listen("crypto-progress", (event) => {
   const currentProgress = event.payload;
 
@@ -403,14 +479,14 @@ cryptoForm.addEventListener("submit", async (e) => {
 
   if (!targetPath || !outputDir || !keyPath) {
     statusMsg.textContent = "Please select Source, Output Folder, and Key Location before proceeding.";
-    statusMsg.style.color = "#ff4444";
+    statusMsg.style.color = "#f87171";
     return;
   }
 
   await runPreFlightSpaceCheck();
   if (!storageCheckPassed) {
     statusMsg.textContent = "Cannot proceed: Please resolve storage or path conflict errors above.";
-    statusMsg.style.color = "#ff4444";
+    statusMsg.style.color = "#f87171";
     return;
   }
 
@@ -422,19 +498,19 @@ cryptoForm.addEventListener("submit", async (e) => {
   if (currentMode === "ENCRYPT") {
     if (mainPin !== confirmPin) {
       statusMsg.textContent = "Error: Master Passwords do not match.";
-      statusMsg.style.color = "#ff4444";
+      statusMsg.style.color = "#f87171";
       return;
     }
 
     if (keyModeSelect.value === "generate" && deceptionPasscode) {
       if (deceptionPasscode === mainPin) {
         statusMsg.textContent = "Error: Deception passcode cannot match Master Password.";
-        statusMsg.style.color = "#ff4444";
+        statusMsg.style.color = "#f87171";
         return;
       }
       if (deceptionPasscode !== confirmDeception) {
         statusMsg.textContent = "Error: Deception passcodes do not match.";
-        statusMsg.style.color = "#ff4444";
+        statusMsg.style.color = "#f87171";
         return;
       }
     }
@@ -445,6 +521,10 @@ cryptoForm.addEventListener("submit", async (e) => {
   const useExistingPublicKey =
     currentMode === "ENCRYPT" && keyModeSelect.value === "existing_obp";
 
+  isOperationRunning = true;
+  actionBtn.disabled = true;
+  updateCancelCleanButtonUI();
+
   progressContainer.style.display = "block";
   progressBar.style.width = "0%";
   if (progressPercent) progressPercent.textContent = "0%";
@@ -453,7 +533,6 @@ cryptoForm.addEventListener("submit", async (e) => {
   statusMsg.textContent =
     "Executing in-memory cryptographic streaming. Do not close the application.";
   statusMsg.style.color = "var(--accent)";
-  actionBtn.disabled = true;
 
   try {
     const response = await invoke("process_cryptography", {
@@ -469,11 +548,16 @@ cryptoForm.addEventListener("submit", async (e) => {
     });
 
     statusMsg.textContent = response;
-    statusMsg.style.color = "#28a745";
+    statusMsg.style.color = "#38bdf8";
   } catch (error) {
     statusMsg.textContent = "Error: " + error;
-    statusMsg.style.color = "#ff4444";
+    statusMsg.style.color = "#f87171";
+    progressContainer.style.display = "none";
   } finally {
+    isOperationRunning = false;
+    actionBtn.disabled = false;
+    updateCancelCleanButtonUI();
+
     mainPinInput.value = "";
     confirmPinInput.value = "";
     deceptionInput.value = "";
@@ -483,6 +567,5 @@ cryptoForm.addEventListener("submit", async (e) => {
     deceptionMatchMsg.textContent = "";
     strengthContainer.style.display = "none";
     strengthText.style.display = "none";
-    actionBtn.disabled = false;
   }
 });

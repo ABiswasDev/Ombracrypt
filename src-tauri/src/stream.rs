@@ -8,6 +8,8 @@ use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tar::{Archive, EntryType};
 use tauri::{AppHandle, Emitter};
 use zeroize::{Zeroize, Zeroizing};
@@ -214,8 +216,7 @@ pub fn validate_tar_entry_type(entry_type: EntryType) -> Result<(), String> {
     }
 }
 
-/// Sprint 6 Fix: Safely extracts a TAR stream while blocking duplicate paths, entry collisions,
-/// oversized payloads, xattrs, and setuid/setgid/sticky permission bits.
+/// Safely extracts a TAR stream while enforcing depth, path length, entry count, duplicate-path, and suid limits
 pub fn extract_tar_archive_safely<R: Read>(
     archive: &mut Archive<R>,
     stage_dir: &Path,
@@ -227,6 +228,7 @@ pub fn extract_tar_archive_safely<R: Read>(
 
     let mut extracted_bytes = 0u64;
     let mut seen_paths: HashSet<PathBuf> = HashSet::new();
+    const MAX_ARCHIVE_ENTRIES: usize = 50_000;
 
     for entry_res in entries {
         let mut entry = entry_res.map_err(|e| e.to_string())?;
@@ -234,7 +236,12 @@ pub fn extract_tar_archive_safely<R: Read>(
 
         validate_tar_entry_type(entry_type)?;
 
-        let entry_size = entry.header().size().unwrap_or(0);
+        // Strict TAR header size validation (no silent 0-byte fallback)
+        let entry_size = entry
+            .header()
+            .size()
+            .map_err(|e| format!("Security Error: Corrupted TAR header size field: {}", e))?;
+
         extracted_bytes = extracted_bytes.saturating_add(entry_size);
         if extracted_bytes > max_permitted_bytes {
             return Err(
@@ -249,7 +256,33 @@ pub fn extract_tar_archive_safely<R: Read>(
             continue;
         }
 
-        // Reject duplicate relative paths inside the same archive
+        // Anti-bomb invariant: Maximum directory recursion depth <= 64
+        let depth = clean_rel.components().count();
+        if depth > 64 {
+            return Err(format!(
+                "Security Error: Archive path depth exceeds maximum safety limit ({} > 64).",
+                depth
+            ));
+        }
+
+        // Anti-bomb invariant: Relative path length <= 512, component length <= 255
+        if clean_rel.as_os_str().len() > 512 {
+            return Err("Security Error: Archive path length exceeds 512 characters.".to_string());
+        }
+        for comp in clean_rel.components() {
+            if comp.as_os_str().len() > 255 {
+                return Err("Security Error: Path component exceeds 255 characters.".to_string());
+            }
+        }
+
+        // Anti-bomb invariant: Total entry count ceiling
+        if seen_paths.len() >= MAX_ARCHIVE_ENTRIES {
+            return Err(
+                "Security Error: Archive entry count exceeds safe maximum (50,000 entries)."
+                    .to_string(),
+            );
+        }
+
         if !seen_paths.insert(clean_rel.clone()) {
             return Err(format!(
                 "Security Error: Archive contains duplicate or conflicting entry path ({:?}).",
@@ -277,7 +310,6 @@ pub fn extract_tar_archive_safely<R: Read>(
                 fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
 
-            // Never restore untrusted OS permissions (suid/sgid) or extended attributes
             entry.set_preserve_permissions(false);
             entry.set_unpack_xattrs(false);
 
@@ -299,7 +331,7 @@ pub fn extract_tar_archive_safely<R: Read>(
     Ok(())
 }
 
-/// Custom In-Memory Streaming AEAD Writer (Zero .tmp.tar written to disk)
+/// Custom In-Memory Streaming AEAD Writer (Zero .tmp.tar written to disk) with mid-stream cancellation
 pub struct ChunkedEncryptWriter<'a, W: Write> {
     pub inner: W,
     pub cipher_id: u8,
@@ -312,10 +344,20 @@ pub struct ChunkedEncryptWriter<'a, W: Write> {
     pub total_expected: u64,
     pub app: Option<&'a AppHandle>,
     pub last_percent: u8,
+    pub cancellation_token: Option<Arc<AtomicBool>>,
 }
 
 impl<'a, W: Write> ChunkedEncryptWriter<'a, W> {
     fn encrypt_and_flush_chunk(&mut self, is_final: u8) -> std::io::Result<()> {
+        if let Some(ref token) = self.cancellation_token {
+            if token.load(Ordering::Relaxed) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Operation aborted by user.",
+                ));
+            }
+        }
+
         let mut aad = Vec::with_capacity(32 + 8 + 1);
         aad.extend_from_slice(&self.header_hash);
         aad.extend_from_slice(&self.chunk_index.to_le_bytes());
@@ -385,6 +427,15 @@ impl<'a, W: Write> ChunkedEncryptWriter<'a, W> {
 
 impl<'a, W: Write> Write for ChunkedEncryptWriter<'a, W> {
     fn write(&mut self, mut buf: &[u8]) -> std::io::Result<usize> {
+        if let Some(ref token) = self.cancellation_token {
+            if token.load(Ordering::Relaxed) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Operation aborted by user.",
+                ));
+            }
+        }
+
         let total_incoming = buf.len();
         while !buf.is_empty() {
             if self.buffer.len() == CHUNK_SIZE {
@@ -403,7 +454,7 @@ impl<'a, W: Write> Write for ChunkedEncryptWriter<'a, W> {
     }
 }
 
-/// Custom In-Memory Streaming AEAD Reader (Streams decrypted TAR chunks directly in RAM)
+/// Custom In-Memory Streaming AEAD Reader (Streams decrypted TAR chunks directly in RAM) with mid-stream cancellation
 pub struct ChunkedDecryptReader<'a, R: Read> {
     pub inner: R,
     pub cipher_id: u8,
@@ -418,11 +469,21 @@ pub struct ChunkedDecryptReader<'a, R: Read> {
     pub reached_final_chunk: bool,
     pub app: Option<&'a AppHandle>,
     pub last_percent: u8,
+    pub cancellation_token: Option<Arc<AtomicBool>>,
 }
 
 impl<'a, R: Read> ChunkedDecryptReader<'a, R> {
     fn load_next_chunk(&mut self) -> std::io::Result<bool> {
         clear_and_zeroize_buffer(&mut self.buffer);
+
+        if let Some(ref token) = self.cancellation_token {
+            if token.load(Ordering::Relaxed) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Operation aborted by user.",
+                ));
+            }
+        }
 
         if self.reached_final_chunk {
             return Ok(false);
@@ -531,6 +592,16 @@ impl<'a, R: Read> Read for ChunkedDecryptReader<'a, R> {
         if out.is_empty() {
             return Ok(0);
         }
+
+        if let Some(ref token) = self.cancellation_token {
+            if token.load(Ordering::Relaxed) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Operation aborted by user.",
+                ));
+            }
+        }
+
         if self.read_pos >= self.buffer.len() {
             let has_more = self.load_next_chunk()?;
             if !has_more {

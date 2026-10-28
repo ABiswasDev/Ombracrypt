@@ -90,6 +90,42 @@ pub fn create_secure_staging_dir(out_dir: &Path, file_stem: &str) -> Result<Path
     Ok(stage_dir)
 }
 
+/// Scans only the designated target folder for stale Ombracrypt staging remnants and purges them
+pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
+    if !dir.exists() || !dir.is_dir() {
+        return Ok((0, 0));
+    }
+
+    let mut count = 0usize;
+    let mut freed_bytes = 0u64;
+
+    let entries = fs::read_dir(dir).map_err(|e| format!("Failed to inspect directory: {}", e))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let file_name = entry.file_name();
+        let name_str = file_name.to_string_lossy();
+
+        if path.is_dir() && name_str.starts_with(".ombracrypt_stage_") {
+            if let Ok((b, _)) = calculate_dir_metrics(&path) {
+                freed_bytes = freed_bytes.saturating_add(b);
+            }
+            if fs::remove_dir_all(&path).is_ok() {
+                count += 1;
+            }
+        } else if path.is_file() && name_str.starts_with('.') && name_str.ends_with(".part") {
+            if let Ok(meta) = path.metadata() {
+                freed_bytes = freed_bytes.saturating_add(meta.len());
+            }
+            if fs::remove_file(&path).is_ok() {
+                count += 1;
+            }
+        }
+    }
+
+    sync_parent_directory(dir);
+    Ok((count, freed_bytes))
+}
+
 /// Reads an .obk or .obp key file only after enforcing strict minimum and maximum byte bounds
 pub fn read_bounded_key_file(path_str: &str, label: &str) -> Result<Zeroizing<Vec<u8>>, String> {
     let file = File::open(path_str)

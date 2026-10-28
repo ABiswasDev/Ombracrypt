@@ -1,6 +1,6 @@
 {
   "productName": "Ombracrypt",
-  "version": "1.1.0",
+  "version": "2.0.0-beta",
   "identifier": "com.abiswasdev.ombracrypt",
   "build": {
     "frontendDist": "../src"
@@ -9,7 +9,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Ombracrypt 1.1.0",
+        "title": "Ombracrypt 2.0.0-beta",
         "width": 540,
         "height": 760,
         "minWidth": 500,

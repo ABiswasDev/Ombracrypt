@@ -2,6 +2,8 @@ use rand::{rngs::OsRng, RngCore};
 use std::fs::{self, File};
 use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use tar::{Archive, Builder};
 use tauri::AppHandle;
 use zeroize::Zeroizing;
@@ -87,6 +89,7 @@ pub fn encrypt_vault(
     kem: &str,
     main_pin: &str,
     deception_passcode: &str,
+    cancellation_token: Option<Arc<AtomicBool>>,
 ) -> Result<String, String> {
     encrypt_vault_core(
         Some(app),
@@ -98,6 +101,7 @@ pub fn encrypt_vault(
         kem,
         main_pin,
         deception_passcode,
+        cancellation_token,
     )
 }
 
@@ -112,7 +116,16 @@ pub fn encrypt_vault_core(
     kem: &str,
     main_pin: &str,
     deception_passcode: &str,
+    cancellation_token: Option<Arc<AtomicBool>>,
 ) -> Result<String, String> {
+    // Sprint 8 Backend Invariant Verification
+    if main_pin.trim().is_empty() {
+        return Err("Security Error: Master Password cannot be empty or whitespace only.".to_string());
+    }
+    if !deception_passcode.trim().is_empty() && main_pin == deception_passcode {
+        return Err("Security Error: Deception passcode cannot match Master Password.".to_string());
+    }
+
     emit_progress(app, 5)?;
 
     let (cipher_id, nonce_len) = match cipher {
@@ -236,6 +249,7 @@ pub fn encrypt_vault_core(
         total_expected: estimated_tar_size,
         app,
         last_percent: 30,
+        cancellation_token,
     };
 
     let mut tar_builder = Builder::new(encrypt_writer);
@@ -286,8 +300,16 @@ pub fn decrypt_vault(
     key_path: Option<&str>,
     output_dir: &str,
     main_pin: &str,
+    cancellation_token: Option<Arc<AtomicBool>>,
 ) -> Result<String, String> {
-    decrypt_vault_core(Some(app), vault_path, key_path, output_dir, main_pin)
+    decrypt_vault_core(
+        Some(app),
+        vault_path,
+        key_path,
+        output_dir,
+        main_pin,
+        cancellation_token,
+    )
 }
 
 /// Core On-the-Fly Streaming Decryption Pipeline
@@ -297,6 +319,7 @@ pub fn decrypt_vault_core(
     key_path: Option<&str>,
     output_dir: &str,
     main_pin: &str,
+    cancellation_token: Option<Arc<AtomicBool>>,
 ) -> Result<String, String> {
     emit_progress(app, 10)?;
 
@@ -374,12 +397,12 @@ pub fn decrypt_vault_core(
         reached_final_chunk: false,
         app,
         last_percent: 40,
+        cancellation_token,
     };
 
     let mut archive = Archive::new(decrypt_reader);
     let max_permitted_bytes = header.uncompressed_bytes.saturating_add(1024 * 1024);
 
-    // Sprint 6 Fix: Isolated extraction with duplicate-path & suid/permission sanitization
     extract_tar_archive_safely(&mut archive, &stage_dir, max_permitted_bytes)?;
 
     let mut reader = archive.into_inner();

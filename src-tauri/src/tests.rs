@@ -1,10 +1,13 @@
 use rand::{rngs::OsRng, RngCore};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use tar::EntryType;
 
 use crate::fs_guard::{
-    read_bounded_key_file, CommitRollbackGuard, TempDirGuard, MAX_KEY_FILE_BYTES,
+    clean_scoped_staging_dir, read_bounded_key_file, CommitRollbackGuard, TempDirGuard,
+    MAX_KEY_FILE_BYTES,
 };
 use crate::pipeline::{decrypt_vault_core, encrypt_vault_core};
 use crate::stream::{sanitize_tar_path, validate_tar_entry_type, CHUNK_SIZE};
@@ -47,6 +50,7 @@ fn test_roundtrip_xwing_xchacha20_and_zero_temp_files() {
         "xwing",
         "CorrectHorseBatteryStaple!",
         "DuressCode999",
+        None,
     )
     .expect("Encryption should succeed");
 
@@ -55,7 +59,6 @@ fn test_roundtrip_xwing_xchacha20_and_zero_temp_files() {
     let obp_path = key_dir.join("sample_payload.obp");
     assert!(obv_path.exists() && obk_path.exists() && obp_path.exists());
 
-    // Verify only the .obv file exists in vault_dir (zero leftover .part files)
     assert_eq!(fs::read_dir(&vault_dir).unwrap().count(), 1);
 
     decrypt_vault_core(
@@ -64,6 +67,7 @@ fn test_roundtrip_xwing_xchacha20_and_zero_temp_files() {
         Some(obk_path.to_str().unwrap()),
         extract_dir.to_str().unwrap(),
         "CorrectHorseBatteryStaple!",
+        None,
     )
     .expect("Decryption should succeed");
 
@@ -97,6 +101,7 @@ fn test_roundtrip_cypherpunk_aes256gcm() {
         "cypherpunk",
         "MasterPass#2026",
         "",
+        None,
     )
     .expect("Multi-chunk encryption should succeed");
 
@@ -109,6 +114,7 @@ fn test_roundtrip_cypherpunk_aes256gcm() {
         Some(obk_path.to_str().unwrap()),
         extract_dir.to_str().unwrap(),
         "MasterPass#2026",
+        None,
     )
     .expect("Multi-chunk decryption should succeed");
 
@@ -141,6 +147,7 @@ fn test_public_key_obp_sealing_workflow() {
         "xwing",
         "1234",
         "5555",
+        None,
     )
     .unwrap();
 
@@ -157,6 +164,7 @@ fn test_public_key_obp_sealing_workflow() {
         "xwing",
         "2345",
         "",
+        None,
     )
     .unwrap();
 
@@ -166,6 +174,7 @@ fn test_public_key_obp_sealing_workflow() {
         Some(obk_path.to_str().unwrap()),
         out_1.to_str().unwrap(),
         "1234",
+        None,
     )
     .expect("Vault 1 must unlock with 1234");
 
@@ -175,6 +184,7 @@ fn test_public_key_obp_sealing_workflow() {
         Some(obk_path.to_str().unwrap()),
         out_2.to_str().unwrap(),
         "2345",
+        None,
     )
     .expect("Vault 2 must unlock with 2345");
 }
@@ -204,6 +214,7 @@ fn test_audit_p0_collision_preserves_existing_obk_and_obv() {
         "xwing",
         "pass123",
         "",
+        None,
     );
 
     assert!(res.is_err(), "Collision must be rejected");
@@ -236,6 +247,7 @@ fn test_wrong_password_rejected_and_staging_cleaned() {
         "xwing",
         "RightPassword",
         "DuressPassword",
+        None,
     )
     .unwrap();
 
@@ -249,6 +261,7 @@ fn test_wrong_password_rejected_and_staging_cleaned() {
         Some(obk.to_str().unwrap()),
         out_dir.to_str().unwrap(),
         "WrongPasswordTypo",
+        None,
     );
 
     assert!(err.is_err());
@@ -281,13 +294,13 @@ fn test_header_tampering_aad_rejection() {
         "xwing",
         "Pass1234",
         "",
+        None,
     )
     .unwrap();
 
     let obv = vault_dir.join("data.obv");
     let obk = vault_dir.join("data.obk");
 
-    // Flip 1 bit inside the uncompressed_size metadata field in the header (byte offset 20)
     let mut vault_bytes = fs::read(&obv).unwrap();
     vault_bytes[20] ^= 0x01;
     fs::write(&obv, &vault_bytes).unwrap();
@@ -298,6 +311,7 @@ fn test_header_tampering_aad_rejection() {
         Some(obk.to_str().unwrap()),
         out_dir.to_str().unwrap(),
         "Pass1234",
+        None,
     );
     assert!(res.is_err(), "Tampered header must fail AEAD AAD verification");
 }
@@ -324,6 +338,7 @@ fn test_duress_trapdoor_scrambles_obk() {
         "xwing",
         "RealSecret123",
         "PanicDuress999",
+        None,
     )
     .unwrap();
 
@@ -337,6 +352,7 @@ fn test_duress_trapdoor_scrambles_obk() {
         Some(obk.to_str().unwrap()),
         out_dir.to_str().unwrap(),
         "PanicDuress999",
+        None,
     );
     assert!(res.is_err());
 
@@ -350,10 +366,6 @@ fn test_zip_slip_path_traversal_sanitization() {
     assert!(sanitize_tar_path(Path::new("/etc/shadow")).is_err());
     assert!(sanitize_tar_path(Path::new("safe/subdir/file.txt")).is_ok());
 }
-
-// =========================================================================
-// SPRINT 1 & SPRINT 2 ADVERSARIAL SECURITY REGRESSION TESTS
-// =========================================================================
 
 #[test]
 fn test_sprint1_kdf_parameter_dos_bomb_rejected() {
@@ -377,13 +389,13 @@ fn test_sprint1_kdf_parameter_dos_bomb_rejected() {
         "xwing",
         "Pass1234",
         "",
+        None,
     )
     .unwrap();
 
     let obv = vault_dir.join("data.obv");
     let obk = vault_dir.join("data.obk");
 
-    // Maliciously overwrite m_cost (bytes 7..11) with 4 GiB (4_194_304 KiB)
     let mut vault_bytes = fs::read(&obv).unwrap();
     vault_bytes[7..11].copy_from_slice(&4_194_304u32.to_le_bytes());
     fs::write(&obv, &vault_bytes).unwrap();
@@ -394,6 +406,7 @@ fn test_sprint1_kdf_parameter_dos_bomb_rejected() {
         Some(obk.to_str().unwrap()),
         out_dir.to_str().unwrap(),
         "Pass1234",
+        None,
     );
     assert!(res.is_err());
     assert!(res.unwrap_err().contains("Untrusted or unsupported Argon2id"));
@@ -417,17 +430,17 @@ fn test_sprint1_mismatched_cipher_and_nonce_rejected_without_panic() {
         vault_dir.to_str().unwrap(),
         vault_dir.to_str().unwrap(),
         false,
-        "xchacha20", // cipher_id = 1, nonce_len = 24
+        "xchacha20",
         "xwing",
         "Pass1234",
         "",
+        None,
     )
     .unwrap();
 
     let obv = vault_dir.join("data.obv");
     let obk = vault_dir.join("data.obk");
 
-    // Tamper cipher_id (byte 5) to AES-256-GCM (2) while leaving nonce_len = 24
     let mut vault_bytes = fs::read(&obv).unwrap();
     vault_bytes[5] = 2;
     fs::write(&obv, &vault_bytes).unwrap();
@@ -438,6 +451,7 @@ fn test_sprint1_mismatched_cipher_and_nonce_rejected_without_panic() {
         Some(obk.to_str().unwrap()),
         out_dir.to_str().unwrap(),
         "Pass1234",
+        None,
     );
     assert!(res.is_err());
     assert!(res.unwrap_err().contains("Invalid cipher ID or mismatched nonce"));
@@ -477,7 +491,6 @@ fn test_sprint2_overlapping_source_and_output_directories_rejected() {
     }
     fs::write(src_dir.join("code.rs"), b"fn main() {}").unwrap();
 
-    // Case 1: Vault output folder inside source folder
     let res1 = encrypt_vault_core(
         None,
         src_dir.to_str().unwrap(),
@@ -488,11 +501,11 @@ fn test_sprint2_overlapping_source_and_output_directories_rejected() {
         "xwing",
         "Pass123",
         "",
+        None,
     );
     assert!(res1.is_err());
     assert!(res1.unwrap_err().contains("inside the Input Folder"));
 
-    // Case 2: Key output folder inside source folder
     let res2 = encrypt_vault_core(
         None,
         src_dir.to_str().unwrap(),
@@ -503,6 +516,7 @@ fn test_sprint2_overlapping_source_and_output_directories_rejected() {
         "xwing",
         "Pass123",
         "",
+        None,
     );
     assert!(res2.is_err());
     assert!(res2.unwrap_err().contains("inside the Input Folder"));
@@ -530,10 +544,6 @@ fn test_sprint2_transactional_commit_rolls_back_on_partial_failure() {
     assert!(!final_1.exists(), "First committed artifact must be rolled back");
     assert_eq!(fs::read(&final_2).unwrap(), b"EXISTING_VAULT_DO_NOT_TOUCH");
 }
-
-// =========================================================================
-// SPRINT 3 & SPRINT 4 CONFORMANCE, FINGERPRINT & TRUNCATION TESTS
-// =========================================================================
 
 #[test]
 fn test_sprint3_xwing_shake256_deterministic_keygen_and_vectors() {
@@ -640,13 +650,13 @@ fn test_sprint4_truncated_vault_ciphertext_rejected_and_cleaned() {
         "xwing",
         "Pass1234",
         "",
+        None,
     )
     .unwrap();
 
     let obv = vault_dir.join("data.obv");
     let obk = vault_dir.join("data.obk");
 
-    // Truncate the last 10 bytes of the encrypted vault stream
     let mut bytes = fs::read(&obv).unwrap();
     bytes.truncate(bytes.len() - 10);
     fs::write(&obv, &bytes).unwrap();
@@ -657,6 +667,7 @@ fn test_sprint4_truncated_vault_ciphertext_rejected_and_cleaned() {
         Some(obk.to_str().unwrap()),
         out_dir.to_str().unwrap(),
         "Pass1234",
+        None,
     );
     assert!(res.is_err(), "Truncated vault must be rejected");
     assert!(
@@ -664,10 +675,6 @@ fn test_sprint4_truncated_vault_ciphertext_rejected_and_cleaned() {
         "Staging directory must be wiped when truncation is detected"
     );
 }
-
-// =========================================================================
-// SPRINT 5 MEMORY HYGIENE, 0600 PERMISSIONS & DURESS HARDENING TESTS
-// =========================================================================
 
 #[cfg(unix)]
 #[test]
@@ -693,6 +700,7 @@ fn test_sprint5_obk_file_created_with_0600_owner_only_permissions() {
         "xwing",
         "Pass1234",
         "",
+        None,
     )
     .unwrap();
 
@@ -714,7 +722,6 @@ fn test_sprint5_plaintext_buffer_zeroized_before_clear() {
     crate::stream::clear_and_zeroize_buffer(&mut buf);
     assert_eq!(buf.len(), 0);
 
-    // Inspect underlying allocated capacity to confirm bytes were overwritten with 0x00 before clear()
     let raw_capacity_slice = unsafe { std::slice::from_raw_parts(ptr, 64) };
     assert!(
         raw_capacity_slice.iter().all(|&b| b == 0),
@@ -739,6 +746,7 @@ fn test_sprint5_decrypt_reader_empty_slice_read_does_not_advance_stream() {
         reached_final_chunk: false,
         app: None,
         last_percent: 40,
+        cancellation_token: None,
     };
 
     let mut empty_buf: [u8; 0] = [];
@@ -770,6 +778,7 @@ fn test_sprint5_unknown_cipher_and_kem_rejected_explicitly() {
         "xwing",
         "Pass123",
         "",
+        None,
     );
     assert!(bad_cipher.is_err());
     assert!(bad_cipher.unwrap_err().contains("Unsupported cipher"));
@@ -784,6 +793,7 @@ fn test_sprint5_unknown_cipher_and_kem_rejected_explicitly() {
         "rsa2048_unknown",
         "Pass123",
         "",
+        None,
     );
     assert!(bad_kem.is_err());
     assert!(bad_kem.unwrap_err().contains("Unsupported KEM"));
@@ -815,17 +825,12 @@ fn test_sprint5_duress_scramble_rejects_symlinks_and_oversized_targets() {
     }
 }
 
-// =========================================================================
-// SPRINT 6 OFFICIAL NIST/IETF KAT VECTORS & HOSTILE TAR ISOLATION TESTS
-// =========================================================================
-
 #[test]
 fn test_sprint6_nist_fips202_and_rfc7748_official_kat_vectors() {
     use sha3::digest::{ExtendableOutput, Update, XofReader};
     use sha3::{Digest, Sha3_256, Shake256};
     use x25519_dalek::{PublicKey, StaticSecret};
 
-    // 1. Official NIST FIPS 202 KAT Vector: SHA3-256("abc")
     let digest_abc = Sha3_256::digest(b"abc");
     let expected_sha3_abc: [u8; 32] = [
         0x3a, 0x98, 0x5d, 0xa7, 0x4f, 0xe2, 0x25, 0xb2, 0x04, 0x5c, 0x17, 0x2d, 0x6b, 0xd3, 0x90,
@@ -834,7 +839,6 @@ fn test_sprint6_nist_fips202_and_rfc7748_official_kat_vectors() {
     ];
     assert_eq!(digest_abc.as_slice(), &expected_sha3_abc);
 
-    // 2. Official NIST FIPS 202 KAT Vector: SHAKE256("", 32)
     let mut shake = Shake256::default();
     shake.update(b"");
     let mut xof = shake.finalize_xof();
@@ -847,7 +851,6 @@ fn test_sprint6_nist_fips202_and_rfc7748_official_kat_vectors() {
     ];
     assert_eq!(shake_out, expected_shake_empty);
 
-    // 3. Official IETF RFC 7748 §6.1 X25519 Diffie-Hellman KAT Vector
     let alice_sk_bytes: [u8; 32] = [
         0x77, 0x07, 0x6d, 0x0a, 0x73, 0x18, 0xa5, 0x7d, 0x3c, 0x16, 0xc1, 0x72, 0x51, 0xb2, 0x66,
         0x45, 0xdf, 0x4c, 0x2f, 0x87, 0xeb, 0xc0, 0x99, 0x2a, 0xb1, 0x77, 0xfb, 0xa5, 0x1d, 0xb9,
@@ -883,13 +886,11 @@ fn test_sprint6_xwing_deterministic_encaps_decaps_and_implicit_rejection() {
     assert_eq!(ct1, ct2, "Deterministic X-Wing encapsulation must produce identical ciphertext");
     assert_eq!(*ss1, *ss2, "Deterministic X-Wing encapsulation must produce identical shared secret");
 
-    // Verify decapsulation recovers the exact shared secret
     let (duress, decaps_ss) =
         crate::crypto::decapsulate_with_obk(1, &obk, &ct1, "MasterPass").unwrap();
     assert!(!duress);
     assert_eq!(*decaps_ss.unwrap(), *ss1);
 
-    // FIPS 203 Implicit Rejection check: corrupt 1 byte in ML-KEM-768 ciphertext
     let mut tampered_ct = ct1.clone();
     tampered_ct[0] ^= 0xFF;
     let (_, rejected_ss) =
@@ -953,7 +954,6 @@ fn test_sprint6_malicious_tar_setuid_and_setgid_bits_stripped() {
         let mut header = Header::new_gnu();
         header.set_size(payload.len() as u64);
         header.set_entry_type(EntryType::Regular);
-        // Set malicious setuid (0o4000) + setgid (0o2000) + sticky (0o1000) + 0o777 bits
         header.set_mode(0o7777);
         header.set_cksum();
         builder
@@ -972,4 +972,140 @@ fn test_sprint6_malicious_tar_setuid_and_setgid_bits_stripped() {
         0,
         "setuid, setgid, and sticky bits (0o7000) must be completely stripped upon extraction"
     );
+}
+
+// =========================================================================
+// SPRINT 8 BACKEND INVARIANTS, MID-STREAM CANCELLATION & SCOPED CLEANER TESTS
+// =========================================================================
+
+#[test]
+fn test_sprint8_backend_rejects_empty_master_pin() {
+    let (ws, _guard) = create_test_workspace("empty_pin");
+    let src = ws.join("src");
+    let out = ws.join("out");
+    fs::create_dir_all(&src).unwrap();
+    fs::create_dir_all(&out).unwrap();
+    fs::write(src.join("f.txt"), b"data").unwrap();
+
+    let res = encrypt_vault_core(
+        None,
+        src.to_str().unwrap(),
+        out.to_str().unwrap(),
+        out.to_str().unwrap(),
+        false,
+        "xchacha20",
+        "xwing",
+        "   ",
+        "",
+        None,
+    );
+    assert!(res.is_err());
+    assert!(res.unwrap_err().contains("Master Password cannot be empty"));
+}
+
+#[test]
+fn test_sprint8_backend_rejects_identical_master_and_duress() {
+    let (ws, _guard) = create_test_workspace("identical_pins");
+    let src = ws.join("src");
+    let out = ws.join("out");
+    fs::create_dir_all(&src).unwrap();
+    fs::create_dir_all(&out).unwrap();
+    fs::write(src.join("f.txt"), b"data").unwrap();
+
+    let res = encrypt_vault_core(
+        None,
+        src.to_str().unwrap(),
+        out.to_str().unwrap(),
+        out.to_str().unwrap(),
+        false,
+        "xchacha20",
+        "xwing",
+        "SamePassword123",
+        "SamePassword123",
+        None,
+    );
+    assert!(res.is_err());
+    assert!(res.unwrap_err().contains("cannot match Master Password"));
+}
+
+#[test]
+fn test_sprint8_mid_stream_cancellation_cleans_staging_artifacts() {
+    let (ws, _guard) = create_test_workspace("cancel_clean");
+    let src = ws.join("src");
+    let out = ws.join("out");
+    fs::create_dir_all(&src).unwrap();
+    fs::create_dir_all(&out).unwrap();
+
+    let large_payload = vec![0x33u8; CHUNK_SIZE * 3];
+    fs::write(src.join("payload.dat"), &large_payload).unwrap();
+
+    let cancel_flag = Arc::new(AtomicBool::new(true)); // Pre-trip cancellation flag
+
+    let res = encrypt_vault_core(
+        None,
+        src.to_str().unwrap(),
+        out.to_str().unwrap(),
+        out.to_str().unwrap(),
+        false,
+        "xchacha20",
+        "xwing",
+        "Password#1234",
+        "",
+        Some(cancel_flag),
+    );
+
+    assert!(res.is_err());
+    assert!(res.unwrap_err().contains("Operation aborted by user"));
+
+    let leftover_count = fs::read_dir(&out).unwrap().count();
+    assert_eq!(
+        leftover_count, 0,
+        "All staging files must be cleaned upon mid-stream cancellation"
+    );
+}
+
+#[test]
+fn test_sprint8_scoped_cleaner_purges_only_matching_artifacts() {
+    let (ws, _guard) = create_test_workspace("scoped_cleaner");
+    let legit_file = ws.join("important_user_doc.txt");
+    let stale_part = ws.join(".abandoned.obv.123456.part");
+    let stale_stage = ws.join(".ombracrypt_stage_data_abcdef");
+
+    fs::write(&legit_file, b"KEEP THIS FILE").unwrap();
+    fs::write(&stale_part, vec![0u8; 1024]).unwrap();
+    fs::create_dir_all(stale_stage.join("nested")).unwrap();
+    fs::write(stale_stage.join("nested/junk.txt"), vec![0u8; 2048]).unwrap();
+
+    let (cleaned, freed) = clean_scoped_staging_dir(&ws).unwrap();
+    assert_eq!(cleaned, 2);
+    assert_eq!(freed, 3072);
+
+    assert!(legit_file.exists(), "Legitimate files must not be touched");
+    assert!(!stale_part.exists());
+    assert!(!stale_stage.exists());
+}
+
+#[test]
+fn test_sprint8_tar_bomb_excessive_directory_depth_rejected() {
+    use std::io::Cursor;
+    use tar::{Builder, Header};
+
+    let (ws, _guard) = create_test_workspace("tar_depth");
+    let mut tar_bytes = Vec::new();
+    {
+        let mut builder = Builder::new(&mut tar_bytes);
+        let deep_path: String = (0..70).map(|i| format!("d{}/", i)).collect::<Vec<_>>().join("") + "file.txt";
+        let mut h = Header::new_gnu();
+        h.set_size(4);
+        h.set_entry_type(EntryType::Regular);
+        h.set_mode(0o644);
+        h.set_cksum();
+        builder.append_data(&mut h, deep_path, &b"test"[..]).unwrap();
+        builder.finish().unwrap();
+    }
+
+    let mut archive = tar::Archive::new(Cursor::new(tar_bytes));
+    let res = crate::stream::extract_tar_archive_safely(&mut archive, &ws, 1024 * 1024);
+    assert!(res.is_err(), "Excessive path depth (>64) must be rejected");
+    assert!(res.unwrap_err().contains("path depth exceeds maximum safety limit"));
 }

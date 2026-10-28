@@ -5,7 +5,7 @@
   <meta charset="UTF-8" />
   <link rel="stylesheet" href="styles.css" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Ombracrypt</title>
+  <title>Ombracrypt 2.0.0-beta</title>
   <script type="module" src="/main.js" defer></script>
 </head>
 
@@ -38,7 +38,7 @@
         <div id="key-mode-wrapper" class="input-group" style="margin-bottom: 8px; text-align: left;">
           <label for="key-mode-select" class="neon-green-text">Key Handling Mode</label>
           <select id="key-mode-select">
-            <option value="generate">Generate New Keypair (.obk + .obp)</option>
+            <option value="generate">Generate Keys & Encrypt Vault (.obk + .obp)</option>
             <option value="existing_obp">Seal with Existing Public Key (.obp)</option>
           </select>
         </div>
@@ -80,7 +80,7 @@
         <!-- Master Password -->
         <div class="input-group">
           <input id="main-pin" type="password" placeholder="Master Password" required />
-          <div id="password-strength-container" style="display: none; height: 3px; background: #444; border-radius: 2px; margin-top: 3px;">
+          <div id="password-strength-container" style="display: none; height: 3px; background: #1c324f; border-radius: 2px; margin-top: 3px;">
             <div id="password-strength-bar" style="height: 100%; width: 0%; border-radius: 2px; transition: width 0.3s ease, background-color 0.3s ease;"></div>
           </div>
           <small id="password-strength-text" style="display: none; font-weight: 600;"></small>
@@ -107,6 +107,7 @@
       </details>
 
       <button type="submit" id="action-btn">Lock Vault</button>
+      <button type="button" id="cancel-clean-btn" class="cancel-clean-btn" style="display: none;">Cancel Operation</button>
     </form>
 
     <!-- Progress Bar -->
@@ -116,7 +117,7 @@
         <span id="progress-eta">Calculating ETA...</span>
       </div>
       <div style="background-color: var(--panel-bg); border-radius: 4px; border: 1px solid var(--border); overflow: hidden;">
-        <div id="progress-bar" style="width: 0%; height: 8px; background-color: var(--accent); transition: width 0.1s linear;"></div>
+        <div id="progress-bar" style="width: 0%; height: 8px; background: linear-gradient(90deg, #0284c7 0%, #38bdf8 100%); transition: width 0.1s linear;"></div>
       </div>
     </div>
     <p id="status-msg"></p>

@@ -47,7 +47,8 @@ impl<'a> RngCore for SliceRng<'a> {
         u64::from_le_bytes(buf)
     }
     fn fill_bytes(&mut self, dest: &mut [u8]) {
-        let _ = self.try_fill_bytes(dest);
+        self.try_fill_bytes(dest)
+            .expect("SliceRng exhausted: seed buffer is undersized");
     }
     fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), RandError> {
         if self.pos + dest.len() > self.data.len() {

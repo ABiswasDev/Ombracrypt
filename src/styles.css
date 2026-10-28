@@ -1,30 +1,55 @@
 :root {
-  --bg-color: #000000;
-  --panel-bg: #0a0a0a;
-  --text-primary: #ffffff;
-  --text-secondary: #a0a0a0;
-  --accent: #007acc;
-  --accent-hover: #005f9e;
-  --border: #222222;
-  --border-focus: #007acc;
+  --bg-color: #060c16;
+  --panel-bg: #0a1322;
+  --text-primary: #f0f6fc;
+  --text-secondary: #8ca2bf;
+  --accent: #38bdf8;
+  --accent-hover: #0284c7;
+  --accent-glow: rgba(56, 189, 248, 0.45);
+  --silver-bright: #e2e8f0;
+  --silver-dim: #94a3b8;
+  --border: #15263d;
+  --border-focus: #38bdf8;
+  --dementor-smoke: #475569;
 }
 
-body {
+html, body {
   margin: 0;
   padding: 0;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
   background-color: var(--bg-color);
   color: var(--text-primary);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  background-image: radial-gradient(circle at 50% 10%, rgba(56, 189, 248, 0.08) 0%, transparent 60%);
+}
+
+/* Custom Patronus Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #060c16;
+}
+::-webkit-scrollbar-thumb {
+  background: #1c324f;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #38bdf8;
+}
+
+body {
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  min-height: 100vh;
 }
 
 .container {
   width: 100%;
-  max-width: 520px;
-  padding: 14px 18px 12px 18px;
+  max-width: 560px;
+  padding: 14px 18px 16px 18px;
   box-sizing: border-box;
 }
 
@@ -42,6 +67,7 @@ body {
   margin: 0;
   color: var(--text-secondary);
   font-size: 0.82rem;
+  letter-spacing: 0.5px;
 }
 
 /* Mode Switcher Tabs */
@@ -54,21 +80,27 @@ body {
 .tab-btn {
   flex: 1;
   padding: 8px;
-  background-color: #111111;
+  background-color: #0a121e;
   color: var(--text-secondary);
   border: 1px solid var(--border);
   border-radius: 4px;
   cursor: pointer;
   font-weight: 600;
   font-size: 0.85rem;
-  transition: all 0.2s ease;
+  transition: all 0.25s ease;
+}
+
+.tab-btn:hover {
+  background-color: #0e1a2b;
+  color: var(--silver-bright);
+  border-color: #203a5c;
 }
 
 .tab-btn.active-tab {
-  background-color: #162436;
-  color: #00e5ff;
-  border-color: #007acc;
-  box-shadow: 0 0 8px rgba(0, 122, 204, 0.4);
+  background-color: #0f2238;
+  color: #e0f2fe;
+  border-color: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
 }
 
 /* File & Folder Selection */
@@ -79,33 +111,36 @@ body {
   padding: 10px 14px;
   text-align: center;
   margin-bottom: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
 
 .divider-top {
   margin-top: 8px;
-  border-top: 1px dashed #2a2a2a;
+  border-top: 1px dashed #1c324f;
   padding-top: 8px;
 }
 
 .secondary-btn {
   width: 100%;
-  background-color: #1e1e1e;
-  color: white;
-  border: 1px solid #3d3d3d;
+  background-color: #0e1b2b;
+  color: var(--silver-bright);
+  border: 1px solid #1f3757;
   padding: 7px 12px;
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.84rem;
-  transition: background-color 0.2s;
+  transition: all 0.2s ease;
 }
 
 .secondary-btn:hover {
-  background-color: #2e2e2e;
+  background-color: #14263d;
+  border-color: var(--accent);
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.25);
 }
 
 .key-btn-accent {
-  background-color: #16222f;
-  border-color: #007acc;
+  background-color: #102137;
+  border-color: #2b4c73;
 }
 
 .path-label {
@@ -120,27 +155,31 @@ body {
 /* Storage Telemetry Box */
 .telemetry-box {
   margin-top: 8px;
-  padding: 6px 8px;
+  padding: 7px 10px;
   border-radius: 4px;
   font-size: 0.76rem;
   font-weight: 600;
-  border: 1px solid #444;
-  background-color: #141414;
+  border: 1px solid #1c3350;
+  background-color: #080f1a;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
 }
 
 .telemetry-ok {
-  border-color: #00C851;
-  color: #00C851;
-  background-color: rgba(0, 200, 81, 0.08);
+  border-color: #38bdf8;
+  color: #7dd3fc;
+  background-color: rgba(56, 189, 248, 0.1);
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.15);
 }
 
 .telemetry-error {
-  border-color: #ff4444;
-  color: #ff4444;
-  background-color: rgba(255, 68, 68, 0.1);
+  border-color: #f87171;
+  color: #fca5a5;
+  background-color: rgba(248, 113, 113, 0.1);
 }
 
-/* Side-by-Side Grids for Compact Height */
+/* Side-by-Side Grids */
 .settings-group {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -174,26 +213,28 @@ input, select {
   color: var(--text-primary);
   font-size: 0.85rem;
   box-sizing: border-box;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 select {
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
-  background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23ffffff%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
+  background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%238ca2bf%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
   background-repeat: no-repeat;
   background-position: right 10px top 50%;
   background-size: 10px auto;
 }
 
 select option {
-  background-color: var(--panel-bg);
+  background-color: #0b1523;
   color: var(--text-primary);
 }
 
 select:focus, input:focus {
   outline: none;
   border-color: var(--border-focus);
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.35);
 }
 
 /* Advanced Options Accordion */
@@ -208,6 +249,11 @@ select:focus, input:focus {
   cursor: pointer;
   user-select: none;
   margin-bottom: 6px;
+  transition: color 0.2s;
+}
+
+.advanced-options summary:hover {
+  color: var(--accent);
 }
 
 .advanced-group {
@@ -227,50 +273,104 @@ small {
 #action-btn {
   width: 100%;
   padding: 10px;
-  background-color: var(--accent);
-  color: white;
+  background: linear-gradient(135deg, #0284c7 0%, #38bdf8 100%);
+  color: #04101e;
   border: none;
   border-radius: 4px;
   font-size: 0.95rem;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: 0.5px;
   cursor: pointer;
-  transition: background-color 0.2s, opacity 0.2s;
+  transition: all 0.25s ease;
   margin-top: 8px;
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.4);
 }
 
 #action-btn:hover:not(:disabled) {
-  background-color: var(--accent-hover);
+  background: linear-gradient(135deg, #0369a1 0%, #0ea5e9 100%);
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.65);
+  color: #ffffff;
 }
 
 #action-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Cancel & Scoped Staging Cleaner Button */
+.cancel-clean-btn {
+  width: 100%;
+  padding: 8px;
+  background-color: #170d13;
+  color: #f87171;
+  border: 1px solid #ef4444;
+  border-radius: 4px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 6px;
+  transition: all 0.2s ease;
+}
+
+.cancel-clean-btn.cancel-active {
+  background-color: #210c0e;
+  color: #f87171;
+  border: 1px solid #ef4444;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.35);
+}
+
+.cancel-clean-btn.cancel-active:hover:not(:disabled) {
+  background-color: rgba(239, 68, 68, 0.25);
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.55);
+}
+
+.cancel-clean-btn.idle-clean {
+  color: var(--text-secondary);
+  border-color: #1d334d;
+  background-color: #09121d;
+}
+
+.cancel-clean-btn.idle-clean:hover {
+  background-color: #112136;
+  color: var(--silver-bright);
+  border-color: var(--accent);
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.2);
+}
+
+.cancel-clean-btn:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 #status-msg {
   text-align: center;
-  font-size: 0.8rem;
-  margin: 8px 0 0 0;
-  min-height: 18px;
+  font-size: 0.82rem;
+  margin: 10px 0 4px 0;
+  min-height: 20px;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+  padding: 0 4px;
 }
 
 .footer-copy {
   font-size: 0.68rem;
-  color: #444;
+  color: #3b506b;
   text-align: center;
-  margin-top: 12px;
+  margin-top: 14px;
   user-select: none;
 }
 
-/* Neon Glowing Classes */
+/* Spectral Patronus Luminescence Overrides */
 .neon-green-text {
-  color: #39ff14 !important;
-  text-shadow: 0 0 4px rgba(57, 255, 20, 0.6), 0 0 8px rgba(57, 255, 20, 0.4);
+  color: #7dd3fc !important;
+  text-shadow: 0 0 6px rgba(125, 211, 252, 0.65), 0 0 12px rgba(56, 189, 248, 0.35);
   font-weight: 500;
 }
 
 .glow-title {
-  color: #00e5ff !important;
-  text-shadow: 0 0 8px rgba(0, 229, 255, 0.7), 0 0 16px rgba(0, 229, 255, 0.4);
-  letter-spacing: 1px;
+  color: #e0f2fe !important;
+  text-shadow: 0 0 10px rgba(56, 189, 248, 0.85), 0 0 22px rgba(56, 189, 248, 0.45);
+  letter-spacing: 1.5px;
 }
