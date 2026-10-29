@@ -15,8 +15,12 @@ env:
 
 jobs:
   rust-security-suite:
-    name: Rust Crypto & Pipeline Regression Tests
-    runs-on: ubuntu-22.04
+    name: Security & Regression Suite (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
 
     defaults:
       run:
@@ -26,7 +30,8 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Tauri v2 Linux System Dependencies
+      - name: Install Tauri v2 Linux Dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -51,5 +56,5 @@ jobs:
       - name: Verify Compilation & Warnings
         run: cargo check --all-targets
 
-      - name: Run 27-Test Security & Conformance Suite
+      - name: Run 36-Test Security & Conformance Suite
         run: cargo test --release -- --nocapture
