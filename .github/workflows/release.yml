@@ -1,8 +1,10 @@
 name: 'Publish Releases'
+
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 jobs:
   publish-tauri:
@@ -15,32 +17,62 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Determine Release Mode
+        id: release_gate
+        shell: bash
+        run: |
+          # Strict semantic versioning tag match: vX.Y.Z (excludes pre-release hyphens like -beta)
+          if [[ "${{ github.ref }}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "is_stable=true" >> "$GITHUB_OUTPUT"
+            echo "tag_name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "Release Mode: STABLE RELEASE (${{ github.ref_name }})"
+          else
+            echo "is_stable=false" >> "$GITHUB_OUTPUT"
+            echo "tag_name=" >> "$GITHUB_OUTPUT"
+            echo "Release Mode: CANDIDATE ARTIFACT ONLY (${{ github.ref_name }})"
+          fi
 
       - name: Install Linux Dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libfuse2 rpm
-        
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          
+
       - name: Setup Rust Stable
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install Frontend Dependencies
-        run: npm install
+        run: npm ci
 
-      - name: Build and Publish Tauri App
+      - name: Build Tauri App (Candidate / Release)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Ombracrypt ${{ github.ref_name }}'
+          # When tagName is empty, tauri-action compiles all desktop bundles without publishing a release
+          tagName: ${{ steps.release_gate.outputs.tag_name }}
+          releaseName: ${{ steps.release_gate.outputs.is_stable == 'true' && format('Ombracrypt {0}', steps.release_gate.outputs.tag_name) || '' }}
           releaseBody: 'Automated release build for Windows, macOS, and Linux.'
           releaseDraft: true
           prerelease: false
+
+      - name: Upload Candidate Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ombracrypt-${{ matrix.platform }}-bundles
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: warn
