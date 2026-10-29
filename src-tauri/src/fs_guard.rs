@@ -277,7 +277,7 @@ impl CommitRollbackGuard {
     }
 
     pub fn commit_file(&mut self, part_path: &Path, final_path: &Path) -> Result<(), String> {
-        // Fast-path anti-collision check against regular files, directories, and broken symlinks[cite: 33]
+        // Anti-collision check against regular files, directories, and broken symlinks
         if fs::symlink_metadata(final_path).is_ok() {
             return Err(format!(
                 "Refusing to overwrite existing file: {}",
@@ -285,7 +285,7 @@ impl CommitRollbackGuard {
             ));
         }
 
-        // Primary: Atomic hard-link promotion (zero TOCTOU race on NTFS, APFS, ext4, Btrfs, ZFS, XFS)[cite: 33]
+        // Primary: Atomic hard-link promotion (NTFS, APFS, ext4, Btrfs, ZFS, XFS)
         match fs::hard_link(part_path, final_path) {
             Ok(()) => {
                 let _ = fs::remove_file(part_path);
@@ -297,45 +297,26 @@ impl CommitRollbackGuard {
                 final_path.display()
             )),
             Err(_) => {
-                // Fallback for filesystems without hard-link support (e.g. FAT32, exFAT, cross-device).[cite: 33]
-                // Atomically claim the destination filename via O_CREAT | O_EXCL to eliminate the TOCTOU overwrite race.[cite: 33]
-                let placeholder = OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(final_path)
-                    .map_err(|e| {
-                        if e.kind() == std::io::ErrorKind::AlreadyExists {
-                            format!(
-                                "Refusing to overwrite existing file: {}",
-                                final_path.display()
-                            )
-                        } else {
-                            format!(
-                                "Failed to commit artifact {}: {}",
-                                final_path.display(),
-                                e
-                            )
-                        }
-                    })?;
-                drop(placeholder);
-
-                #[cfg(unix)]
-                {
-                    if let Ok(meta) = fs::symlink_metadata(part_path) {
-                        let _ = fs::set_permissions(final_path, meta.permissions());
-                    }
-                }
-
-                // Safely copy staging content into the claimed destination and delete the staging part[cite: 33]
-                if let Err(e) = fs::copy(part_path, final_path) {
-                    let _ = fs::remove_file(final_path);
+                // Fallback for filesystems without hard-link support (e.g. FAT32, exFAT).
+                // Both part_path and final_path reside in the exact same directory.
+                // Re-verify absence of destination before atomic directory entry move.
+                if fs::symlink_metadata(final_path).is_ok() {
                     return Err(format!(
-                        "Failed to commit artifact {}: {}",
-                        final_path.display(),
-                        e
+                        "Refusing to overwrite existing file: {}",
+                        final_path.display()
                     ));
                 }
-                let _ = fs::remove_file(part_path);
+
+                // fs::rename within the same directory is an atomic directory-entry update.
+                // Unlike a byte copy, rename never exposes a 0-byte placeholder or partially written file.
+                fs::rename(part_path, final_path).map_err(|e| {
+                    format!(
+                        "Failed to commit artifact {} via atomic rename: {}",
+                        final_path.display(),
+                        e
+                    )
+                })?;
+
                 self.committed.push(final_path.to_path_buf());
                 Ok(())
             }
