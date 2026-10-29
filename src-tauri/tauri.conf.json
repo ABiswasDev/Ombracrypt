@@ -9,7 +9,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Ombracrypt 2.0.0-beta",
+        "title": "Ombracrypt",
         "width": 540,
         "height": 760,
         "minWidth": 500,

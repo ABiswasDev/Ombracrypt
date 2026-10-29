@@ -1,6 +1,6 @@
 [package]
 name = "ombracrypt"
-version = "2.0.0-beta"
+version = "2.0.0"
 description = "Ombracrypt Post-Quantum Vault"
 authors = ["Abhishek Biswas"]
 edition = "2021"

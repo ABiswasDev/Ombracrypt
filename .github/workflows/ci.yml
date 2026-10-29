@@ -56,5 +56,5 @@ jobs:
       - name: Verify Compilation & Warnings
         run: cargo check --all-targets
 
-      - name: Run 36-Test Security & Conformance Suite
+      - name: Run Security & Conformance Suite (39 Tests)
         run: cargo test --release -- --nocapture
