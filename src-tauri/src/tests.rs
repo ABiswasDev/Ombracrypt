@@ -1240,3 +1240,103 @@ fn test_sprint9_decryption_cancellation_sanitized_message() {
         "Extraction directory must be left completely empty upon cancellation"
     );
 }
+
+// =========================================================================
+// SPRINT 10 INDEPENDENT END-TO-END X-WING SPECIFICATION KAT
+// =========================================================================
+
+#[test]
+fn test_sprint10_xwing_independent_reference_kat() {
+    use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret as X25519StaticSecret};
+
+    // Deterministic reference seeds per X-Wing draft test harness
+    let seed = [0x42u8; 32];
+    let ephem_seed = [0x99u8; 64];
+
+    // 1. Generate X-Wing keypair from seed (draft-connolly-cfrg-xwing-kem §4)
+    let (obp, obk, kem_id) =
+        crate::crypto::generate_xwing_keypair_from_seed(&seed, "DuressTrapdoor999").unwrap();
+
+    assert_eq!(kem_id, 1, "Profile ID must be 1 (X-Wing)");
+    assert_eq!(
+        obk.len(),
+        86,
+        "Canonical X-Wing .obk must be 86 bytes (32B seed representation)"
+    );
+    assert_eq!(
+        obp.len(),
+        1222,
+        "Ombracrypt .obp must be 1222 bytes (6B magic + 1216B raw X-Wing PK)"
+    );
+
+    // 2. Validate Raw 1,216-byte Public Key Payload (excluding 6-byte Ombracrypt header)
+    let raw_pk = &obp[6..];
+    assert_eq!(raw_pk.len(), 1216, "Raw X-Wing PK must be exactly 1,216 bytes");
+    let raw_mlkem_ek = &raw_pk[..1184];
+    let raw_x25519_pk = &raw_pk[1184..];
+    assert_eq!(raw_mlkem_ek.len(), 1184);
+    assert_eq!(raw_x25519_pk.len(), 32);
+
+    // Verify recipient X25519 public key matches RFC 7748 from expanded seed bytes [64..96]
+    let expanded = crate::crypto::expand_xwing_seed(&seed);
+    let mut expected_sk_bytes = [0u8; 32];
+    expected_sk_bytes.copy_from_slice(&expanded[64..96]);
+    let expected_x25519_sk = X25519StaticSecret::from(expected_sk_bytes);
+    let expected_x25519_pk = X25519PublicKey::from(&expected_x25519_sk);
+    assert_eq!(
+        raw_x25519_pk,
+        expected_x25519_pk.as_bytes(),
+        "Raw X25519 PK component must match independent RFC 7748 derivation"
+    );
+
+    // 3. Deterministic Encapsulation (draft §5: Raw PK + 64B Ephemeral Seed -> 1,120B CT + 32B SS)
+    let (ct, ss_enc) =
+        crate::crypto::encapsulate_xwing_deterministic(&obp, &ephem_seed).unwrap();
+
+    assert_eq!(
+        ct.len(),
+        1120,
+        "X-Wing combined ciphertext must be exactly 1,120 bytes"
+    );
+    assert_eq!(ss_enc.len(), 32, "Shared secret must be 32 bytes");
+
+    // Verify ephemeral X25519 public key component (ct[1088..1120]) matches ephem_seed[32..64]
+    let mut eph_sk_bytes = [0u8; 32];
+    eph_sk_bytes.copy_from_slice(&ephem_seed[32..64]);
+    let expected_eph_sk = X25519StaticSecret::from(eph_sk_bytes);
+    let expected_eph_pk = X25519PublicKey::from(&expected_eph_sk);
+    assert_eq!(
+        &ct[1088..],
+        expected_eph_pk.as_bytes(),
+        "Ephemeral X25519 PK in ciphertext must match independent RFC 7748 derivation"
+    );
+
+    // 4. Decapsulation with Canonical 86-byte OBK
+    let (duress, ss_dec_opt) =
+        crate::crypto::decapsulate_with_obk(1, &obk, &ct, "MasterPassword").unwrap();
+    assert!(!duress, "Duress flag must be false for normal master password");
+    let ss_dec = ss_dec_opt.expect("Decapsulation must return shared secret");
+    assert_eq!(
+        *ss_dec, *ss_enc,
+        "Decapsulated shared secret must match encapsulated shared secret"
+    );
+
+    // 5. Duress Trapdoor Verification on Canonical 86-byte OBK
+    let (duress_triggered, _) =
+        crate::crypto::decapsulate_with_obk(1, &obk, &ct, "DuressTrapdoor999").unwrap();
+    assert!(
+        duress_triggered,
+        "Duress trapdoor must trigger when duress passcode is supplied"
+    );
+
+    // 6. Implicit Rejection on Corrupted Ciphertext
+    let mut corrupted_ct = ct.clone();
+    corrupted_ct[0] ^= 0x01;
+    let (_, ss_rejected) =
+        crate::crypto::decapsulate_with_obk(1, &obk, &corrupted_ct, "MasterPassword").unwrap();
+    assert_ne!(
+        *ss_rejected.unwrap(),
+        *ss_enc,
+        "Corrupted ciphertext must implicitly reject and produce distinct shared secret"
+    );
+}

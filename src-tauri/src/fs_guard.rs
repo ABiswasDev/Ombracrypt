@@ -1,17 +1,45 @@
-use fs2::available_space;
+use fs2::{available_space, FileExt};
 use rand::{rngs::OsRng, RngCore};
 use serde::Serialize;
+use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use zeroize::Zeroizing;
 
 use crate::crypto::{compute_obk_public_fingerprint, compute_obp_fingerprint};
 use crate::stream::{read_vault_uncompressed_size, CHUNK_SIZE};
 
-/// Maximum permissible size for an .obk or .obp file (8 KiB ceiling prevents OOM DoS)
+/// Maximum permissible size for an .obk or .obp file (8 KiB ceiling prevents OOM DoS)[cite: 33]
 pub const MAX_KEY_FILE_BYTES: u64 = 8192;
 pub const MIN_KEY_FILE_BYTES: u64 = 64;
+
+// Global registry tracking in-flight staging artifacts across threads to prevent cleaner collision[cite: 33]
+static ACTIVE_STAGING_PATHS: Mutex<Option<HashSet<PathBuf>>> = Mutex::new(None);
+
+fn register_active_staging_path(path: PathBuf) {
+    if let Ok(mut lock) = ACTIVE_STAGING_PATHS.lock() {
+        lock.get_or_insert_with(HashSet::new).insert(path);
+    }
+}
+
+fn unregister_active_staging_path(path: &Path) {
+    if let Ok(mut lock) = ACTIVE_STAGING_PATHS.lock() {
+        if let Some(ref mut set) = *lock {
+            set.remove(path);
+        }
+    }
+}
+
+pub fn is_staging_path_active(path: &Path) -> bool {
+    if let Ok(lock) = ACTIVE_STAGING_PATHS.lock() {
+        if let Some(ref set) = *lock {
+            return set.contains(path);
+        }
+    }
+    false
+}
 
 #[derive(Serialize)]
 pub struct SpaceAssessment {
@@ -25,14 +53,14 @@ pub struct SpaceAssessment {
     pub summary: String,
 }
 
-/// Flushes directory metadata to disk/USB so newly committed files/folders appear immediately
+/// Flushes directory metadata to disk/USB so newly committed files/folders appear immediately[cite: 33]
 pub fn sync_parent_directory(dir: &Path) {
     if let Ok(dir_handle) = File::open(dir) {
         let _ = dir_handle.sync_all();
     }
 }
 
-/// Generates a hidden, CSPRNG-unique staging path so concurrent operations never collide
+/// Generates a hidden, CSPRNG-unique staging path so concurrent operations never collide[cite: 33]
 pub fn unique_staging_path(dir: &Path, base_filename: &str) -> PathBuf {
     let mut rnd = [0u8; 6];
     OsRng.fill_bytes(&mut rnd);
@@ -42,7 +70,7 @@ pub fn unique_staging_path(dir: &Path, base_filename: &str) -> PathBuf {
     ))
 }
 
-/// Creates a staging file for private keys (.obk) with strict 0600 (owner-only) permissions on Unix
+/// Creates a staging file for private keys (.obk) with strict 0600 (owner-only) permissions on Unix[cite: 33]
 pub fn create_private_staging_file(path: &Path) -> Result<File, String> {
     let mut opts = OpenOptions::new();
     opts.write(true).create_new(true);
@@ -51,20 +79,25 @@ pub fn create_private_staging_file(path: &Path) -> Result<File, String> {
         use std::os::unix::fs::OpenOptionsExt;
         opts.mode(0o600);
     }
-    opts.open(path)
-        .map_err(|e| format!("Failed to create private key staging file: {}", e))
+    let file = opts
+        .open(path)
+        .map_err(|e| format!("Failed to create private key staging file: {}", e))?;
+    let _ = file.try_lock_exclusive();
+    Ok(file)
 }
 
-/// Creates a standard exclusive staging file for public keys (.obp) and encrypted vaults (.obv)
+/// Creates a standard exclusive staging file for public keys (.obp) and encrypted vaults (.obv)[cite: 33]
 pub fn create_public_staging_file(path: &Path) -> Result<File, String> {
-    OpenOptions::new()
+    let file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)
-        .map_err(|e| format!("Failed to create staging file: {}", e))
+        .map_err(|e| format!("Failed to create staging file: {}", e))?;
+    let _ = file.try_lock_exclusive();
+    Ok(file)
 }
 
-/// Creates a CSPRNG-unique extraction staging directory with restrictive 0700 permissions on Unix
+/// Creates a CSPRNG-unique extraction staging directory with restrictive 0700 permissions on Unix[cite: 33]
 pub fn create_secure_staging_dir(out_dir: &Path, file_stem: &str) -> Result<PathBuf, String> {
     let mut rnd = [0u8; 6];
     OsRng.fill_bytes(&mut rnd);
@@ -90,7 +123,7 @@ pub fn create_secure_staging_dir(out_dir: &Path, file_stem: &str) -> Result<Path
     Ok(stage_dir)
 }
 
-/// Scans only the designated target folder for stale Ombracrypt staging remnants and purges them
+/// Scans only the designated target folder for stale Ombracrypt staging remnants and purges them safely[cite: 33]
 pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
     if !dir.exists() || !dir.is_dir() {
         return Ok((0, 0));
@@ -106,6 +139,10 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
         let name_str = file_name.to_string_lossy();
 
         if path.is_dir() && name_str.starts_with(".ombracrypt_stage_") {
+            // Never purge directories currently active in any running pipeline thread[cite: 33]
+            if is_staging_path_active(&path) {
+                continue;
+            }
             if let Ok((b, _)) = calculate_dir_metrics(&path) {
                 freed_bytes = freed_bytes.saturating_add(b);
             }
@@ -113,6 +150,15 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
                 count += 1;
             }
         } else if path.is_file() && name_str.starts_with('.') && name_str.ends_with(".part") {
+            // Never purge files actively registered or locked by an ongoing write operation[cite: 33]
+            if is_staging_path_active(&path) {
+                continue;
+            }
+            if let Ok(file) = OpenOptions::new().read(true).write(true).open(&path) {
+                if file.try_lock_exclusive().is_err() {
+                    continue;
+                }
+            }
             if let Ok(meta) = path.metadata() {
                 freed_bytes = freed_bytes.saturating_add(meta.len());
             }
@@ -126,7 +172,7 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
     Ok((count, freed_bytes))
 }
 
-/// Reads an .obk or .obp key file only after enforcing strict minimum and maximum byte bounds
+/// Reads an .obk or .obp key file only after enforcing strict minimum and maximum byte bounds[cite: 33]
 pub fn read_bounded_key_file(path_str: &str, label: &str) -> Result<Zeroizing<Vec<u8>>, String> {
     let file = File::open(path_str)
         .map_err(|_| format!("Authentication Error: {} could not be accessed.", label))?;
@@ -155,7 +201,7 @@ pub fn read_bounded_key_file(path_str: &str, label: &str) -> Result<Zeroizing<Ve
     Ok(buf)
 }
 
-/// RAII Guard that automatically removes partial staging files on error or early return
+/// RAII Guard that automatically tracks and removes partial staging files on error or early return[cite: 33]
 pub struct TempFileGuard {
     paths: Vec<PathBuf>,
     armed: bool,
@@ -163,15 +209,24 @@ pub struct TempFileGuard {
 
 impl TempFileGuard {
     pub fn new(paths: Vec<PathBuf>) -> Self {
+        for p in &paths {
+            register_active_staging_path(p.clone());
+        }
         Self { paths, armed: true }
     }
     pub fn disarm(&mut self) {
         self.armed = false;
+        for p in &self.paths {
+            unregister_active_staging_path(p);
+        }
     }
 }
 
 impl Drop for TempFileGuard {
     fn drop(&mut self) {
+        for p in &self.paths {
+            unregister_active_staging_path(p);
+        }
         if self.armed {
             for p in &self.paths {
                 let _ = fs::remove_file(p);
@@ -180,7 +235,7 @@ impl Drop for TempFileGuard {
     }
 }
 
-/// RAII Guard that automatically wipes the temporary extraction staging folder on decryption failure
+/// RAII Guard that automatically tracks and wipes the temporary extraction staging folder on decryption failure[cite: 33]
 pub struct TempDirGuard {
     path: PathBuf,
     armed: bool,
@@ -188,15 +243,18 @@ pub struct TempDirGuard {
 
 impl TempDirGuard {
     pub fn new(path: PathBuf) -> Self {
+        register_active_staging_path(path.clone());
         Self { path, armed: true }
     }
     pub fn disarm(&mut self) {
         self.armed = false;
+        unregister_active_staging_path(&self.path);
     }
 }
 
 impl Drop for TempDirGuard {
     fn drop(&mut self) {
+        unregister_active_staging_path(&self.path);
         if self.armed && self.path.exists() {
             let _ = fs::remove_dir_all(&self.path);
         }
@@ -204,7 +262,7 @@ impl Drop for TempDirGuard {
 }
 
 /// Transactional Publication Guard: Atomically commits staged files without overwriting existing files,
-/// and rolls back all newly committed artifacts if any step in a multi-file commit fails.
+/// and rolls back all newly committed artifacts if any step in a multi-file commit fails.[cite: 33]
 pub struct CommitRollbackGuard {
     committed: Vec<PathBuf>,
     armed: bool,
@@ -219,13 +277,15 @@ impl CommitRollbackGuard {
     }
 
     pub fn commit_file(&mut self, part_path: &Path, final_path: &Path) -> Result<(), String> {
-        if final_path.exists() {
+        // Fast-path anti-collision check against regular files, directories, and broken symlinks[cite: 33]
+        if fs::symlink_metadata(final_path).is_ok() {
             return Err(format!(
                 "Refusing to overwrite existing file: {}",
                 final_path.display()
             ));
         }
 
+        // Primary: Atomic hard-link promotion (zero TOCTOU race on NTFS, APFS, ext4, Btrfs, ZFS, XFS)[cite: 33]
         match fs::hard_link(part_path, final_path) {
             Ok(()) => {
                 let _ = fs::remove_file(part_path);
@@ -237,15 +297,45 @@ impl CommitRollbackGuard {
                 final_path.display()
             )),
             Err(_) => {
-                if final_path.exists() {
+                // Fallback for filesystems without hard-link support (e.g. FAT32, exFAT, cross-device).[cite: 33]
+                // Atomically claim the destination filename via O_CREAT | O_EXCL to eliminate the TOCTOU overwrite race.[cite: 33]
+                let placeholder = OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(final_path)
+                    .map_err(|e| {
+                        if e.kind() == std::io::ErrorKind::AlreadyExists {
+                            format!(
+                                "Refusing to overwrite existing file: {}",
+                                final_path.display()
+                            )
+                        } else {
+                            format!(
+                                "Failed to commit artifact {}: {}",
+                                final_path.display(),
+                                e
+                            )
+                        }
+                    })?;
+                drop(placeholder);
+
+                #[cfg(unix)]
+                {
+                    if let Ok(meta) = fs::symlink_metadata(part_path) {
+                        let _ = fs::set_permissions(final_path, meta.permissions());
+                    }
+                }
+
+                // Safely copy staging content into the claimed destination and delete the staging part[cite: 33]
+                if let Err(e) = fs::copy(part_path, final_path) {
+                    let _ = fs::remove_file(final_path);
                     return Err(format!(
-                        "Refusing to overwrite existing file: {}",
-                        final_path.display()
+                        "Failed to commit artifact {}: {}",
+                        final_path.display(),
+                        e
                     ));
                 }
-                fs::rename(part_path, final_path).map_err(|e| {
-                    format!("Failed to commit artifact {}: {}", final_path.display(), e)
-                })?;
+                let _ = fs::remove_file(part_path);
                 self.committed.push(final_path.to_path_buf());
                 Ok(())
             }
@@ -267,7 +357,7 @@ impl Drop for CommitRollbackGuard {
     }
 }
 
-/// Canonicalizes source and destination paths to ensure output/key folders are never inside the input folder
+/// Canonicalizes source and destination paths to ensure output/key folders are never inside the input folder[cite: 33]
 pub fn verify_no_source_overlap(
     source_dir: &Path,
     dest_dir: &Path,
@@ -287,7 +377,7 @@ pub fn verify_no_source_overlap(
     Ok(())
 }
 
-/// Recursively calculates total payload bytes and file count while rejecting symlinks
+/// Recursively calculates total payload bytes and file count while rejecting symlinks[cite: 33]
 pub fn calculate_dir_metrics(path: &Path) -> Result<(u64, u64), String> {
     let meta = fs::symlink_metadata(path).map_err(|e| format!("Cannot access path: {}", e))?;
     if meta.file_type().is_symlink() {
@@ -307,7 +397,7 @@ pub fn calculate_dir_metrics(path: &Path) -> Result<(u64, u64), String> {
     Ok((total_bytes, count))
 }
 
-/// Pre-flight capacity, canonical overlap, path collision, and Key ID fingerprint check
+/// Pre-flight capacity, canonical overlap, path collision, and Key ID fingerprint check[cite: 33]
 pub fn assess_storage_and_paths(
     mode: &str,
     source_path: &str,
