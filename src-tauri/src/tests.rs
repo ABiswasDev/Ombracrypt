@@ -1243,110 +1243,188 @@ fn test_sprint9_decryption_cancellation_sanitized_message() {
 
 // =========================================================================
 // SPRINT 10 INDEPENDENT SPECIFICATION REFERENCE KAT
-// Specification: IETF draft-connolly-cfrg-xwing-kem-11 (Informational)
 // =========================================================================
-
 #[test]
 fn test_sprint10_xwing_independent_reference_kat() {
-    use sha2::{Digest, Sha256};
-    use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret as X25519StaticSecret};
+    const EXPECTED_PUBLIC_KEY: &[u8] =
+        include_bytes!("../tests/fixtures/xwing_revision11/public_key.bin");
+    const EXPECTED_CIPHERTEXT: &[u8] =
+        include_bytes!("../tests/fixtures/xwing_revision11/ciphertext.bin");
+    const EXPECTED_SHARED_SECRET: &[u8] =
+        include_bytes!("../tests/fixtures/xwing_revision11/shared_secret.bin");
 
-    // Fixed test vector inputs per draft-connolly-cfrg-xwing-kem-11 §5.2.1 & §5.4.1
+    // Fixed input values shared with the independent Go/CIRCL harness
     let seed = [0x42u8; 32];
     let ephem_seed = [0x99u8; 64];
 
-    // 1. Generate X-Wing keypair from seed
     let (obp, obk, kem_id) =
         crate::crypto::generate_xwing_keypair_from_seed(&seed, "DuressTrapdoor999").unwrap();
 
     assert_eq!(kem_id, 1, "Profile ID must be 1 (X-Wing)");
-    assert_eq!(
-        obk.len(),
-        86,
-        "Canonical X-Wing .obk must be 86 bytes (32B seed representation)"
-    );
-    assert_eq!(
-        obp.len(),
-        1222,
-        "Ombracrypt .obp must be 1222 bytes (6B magic + 1216B raw X-Wing PK)"
-    );
+    assert_eq!(obk.len(), 86, "Canonical X-Wing .obk must be 86 bytes");
+    assert_eq!(obp.len(), 1222, "Ombracrypt .obp must be 6-byte header + 1,216-byte raw X-Wing public key");
 
-    // 2. Validate Raw 1,216-byte Public Key Payload (excluding 6-byte Ombracrypt header)
     let raw_pk = &obp[6..];
-    assert_eq!(raw_pk.len(), 1216, "Raw X-Wing PK must be exactly 1,216 bytes");
-    let raw_mlkem_ek = &raw_pk[..1184];
-    let raw_x25519_pk = &raw_pk[1184..];
-    assert_eq!(raw_mlkem_ek.len(), 1184);
-    assert_eq!(raw_x25519_pk.len(), 32);
-
-    // Verify recipient X25519 public key matches RFC 7748 from expanded seed bytes [64..96]
-    let expanded = crate::crypto::expand_xwing_seed(&seed);
-    let mut expected_sk_bytes = [0u8; 32];
-    expected_sk_bytes.copy_from_slice(&expanded[64..96]);
-    let expected_x25519_sk = X25519StaticSecret::from(expected_sk_bytes);
-    let expected_x25519_pk = X25519PublicKey::from(&expected_x25519_sk);
-
+    assert_eq!(raw_pk.len(), 1216);
     assert_eq!(
-        raw_x25519_pk,
-        expected_x25519_pk.as_bytes(),
-        "Recipient X25519 PK component must match RFC 7748 derivation"
+        raw_pk, EXPECTED_PUBLIC_KEY,
+        "Raw X-Wing public key differs from independent reference fixture"
     );
 
-    // 3. Deterministic Encapsulation (draft §5.4.1)
     let (ct, ss_enc) =
         crate::crypto::encapsulate_xwing_deterministic(&obp, &ephem_seed).unwrap();
-
+    assert_eq!(ct.len(), 1120);
     assert_eq!(
-        ct.len(),
-        1120,
-        "X-Wing combined ciphertext must be exactly 1,120 bytes"
+        ct.as_slice(), EXPECTED_CIPHERTEXT,
+        "X-Wing ciphertext differs from independent reference fixture"
     );
-    assert_eq!(ss_enc.len(), 32, "Shared secret must be 32 bytes");
-
-    // Verify ephemeral X25519 public key component matches RFC 7748 from ephem_seed[32..64]
-    let mut eph_sk_bytes = [0u8; 32];
-    eph_sk_bytes.copy_from_slice(&ephem_seed[32..64]);
-    let expected_eph_sk = X25519StaticSecret::from(eph_sk_bytes);
-    let expected_eph_pk = X25519PublicKey::from(&expected_eph_sk);
-
+    assert_eq!(ss_enc.len(), 32);
     assert_eq!(
-        &ct[1088..],
-        expected_eph_pk.as_bytes(),
-        "Ephemeral X25519 PK in ciphertext must match RFC 7748 derivation"
+        &ss_enc[..], EXPECTED_SHARED_SECRET,
+        "X-Wing shared secret differs from independent reference fixture"
     );
 
-    // Deterministic payload hashing to pin exact key and ciphertext state
-    let raw_pk_hash = Sha256::digest(raw_pk);
-    let ct_hash = Sha256::digest(&ct);
-    assert_eq!(raw_pk_hash.len(), 32);
-    assert_eq!(ct_hash.len(), 32);
-
-    // 4. Decapsulation with Canonical 86-byte OBK
-    let (duress, ss_dec_opt) =
-        crate::crypto::decapsulate_with_obk(1, &obk, &ct, "MasterPassword").unwrap();
+    // Complementary local decapsulation, duress, and implicit-rejection checks
+    let (duress, ss_dec_opt) = crate::crypto::decapsulate_with_obk(
+        1,
+        &obk,
+        &ct,
+        "MasterPassword",
+    )
+    .unwrap();
     assert!(!duress, "Duress flag must be false for normal master password");
     let ss_dec = ss_dec_opt.expect("Decapsulation must return shared secret");
-    assert_eq!(
-        *ss_dec, *ss_enc,
-        "Decapsulated shared secret must match encapsulated shared secret"
-    );
+    assert_eq!(*ss_dec, *ss_enc, "Decapsulated shared secret must match encapsulated shared secret");
 
-    // 5. Duress Trapdoor Verification on Canonical 86-byte OBK
-    let (duress_triggered, _) =
-        crate::crypto::decapsulate_with_obk(1, &obk, &ct, "DuressTrapdoor999").unwrap();
-    assert!(
-        duress_triggered,
-        "Duress trapdoor must trigger when duress passcode is supplied"
-    );
+    let (duress_triggered, _) = crate::crypto::decapsulate_with_obk(
+        1,
+        &obk,
+        &ct,
+        "DuressTrapdoor999",
+    )
+    .unwrap();
+    assert!(duress_triggered, "Duress trapdoor must trigger when duress passcode is supplied");
 
-    // 6. Implicit Rejection on Corrupted Ciphertext
     let mut corrupted_ct = ct.clone();
     corrupted_ct[0] ^= 0x01;
-    let (_, ss_rejected) =
-        crate::crypto::decapsulate_with_obk(1, &obk, &corrupted_ct, "MasterPassword").unwrap();
+    let (_, ss_rejected) = crate::crypto::decapsulate_with_obk(
+        1,
+        &obk,
+        &corrupted_ct,
+        "MasterPassword",
+    )
+    .unwrap();
     assert_ne!(
         *ss_rejected.unwrap(),
         *ss_enc,
-        "Corrupted ciphertext must implicitly reject and produce distinct shared secret"
+        "Corrupted ciphertext must implicitly reject and produce a distinct shared secret"
     );
+}
+
+
+
+#[test]
+fn test_fs_guard_atomic_no_replace_publishes_successfully() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ombracrypt_test_publish_ok_{}",
+        rand::random::<u64>()
+    ));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+
+    let staging_path = temp_dir.join(".payload.part");
+    let final_path = temp_dir.join("payload.obv");
+
+    std::fs::write(&staging_path, b"CONFIDENTIAL_PAYLOAD_DATA").unwrap();
+
+    let res = crate::fs_guard::atomic_publish_noreplace(&staging_path, &final_path);
+    assert!(res.is_ok(), "Publication must succeed on clean target");
+
+    assert!(final_path.exists(), "Final file must exist after publication");
+    let read_back = std::fs::read(&final_path).unwrap();
+    assert_eq!(read_back, b"CONFIDENTIAL_PAYLOAD_DATA");
+    assert!(!staging_path.exists(), "Staged .part file must be consumed");
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_fs_guard_atomic_no_replace_prevents_destination_overwrite() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ombracrypt_test_collision_{}",
+        rand::random::<u64>()
+    ));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+
+    let staging_path = temp_dir.join(".malicious_clobber.part");
+    let final_path = temp_dir.join("critical_data.obv");
+
+    // Establish pre-existing destination file
+    std::fs::write(&final_path, b"PRE_EXISTING_IMMUTABLE_VAULT").unwrap();
+    // Staged incoming replacement
+    std::fs::write(&staging_path, b"OVERWRITE_ATTEMPT_DATA").unwrap();
+
+    let res = crate::fs_guard::atomic_publish_noreplace(&staging_path, &final_path);
+    assert!(
+        res.is_err(),
+        "Publication must fail closed when destination already exists"
+    );
+    let err_msg = res.unwrap_err();
+    assert!(
+        err_msg.contains("Refusing to overwrite existing file"),
+        "Error message must explicitly cite collision refusal: {}",
+        err_msg
+    );
+
+    // Destination file must remain 100% unaltered
+    let dest_content = std::fs::read(&final_path).unwrap();
+    assert_eq!(
+        dest_content, b"PRE_EXISTING_IMMUTABLE_VAULT",
+        "Pre-existing destination file was clobbered or truncated!"
+    );
+
+    // Staged source must remain intact so caller's RAII guard manages cleanup
+    assert!(
+        staging_path.exists(),
+        "Staged source file must remain intact upon publication error"
+    );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_fs_guard_atomic_no_replace_fails_closed_on_unsupported_fs() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ombracrypt_test_unsupported_{}",
+        rand::random::<u64>()
+    ));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+
+    let staging_path = temp_dir.join(".staged_work.part");
+    let final_path = temp_dir.join("target.obv");
+
+    std::fs::write(&staging_path, b"STAGED_PAYLOAD").unwrap();
+
+    // Injected simulated unsupported syscall error
+    let res =
+        crate::fs_guard::atomic_publish_noreplace_internal(&staging_path, &final_path, true);
+    assert!(
+        res.is_err(),
+        "Must abort when filesystem lacks no-replace support"
+    );
+    let err_msg = res.unwrap_err();
+    assert!(
+        err_msg.contains("does not support atomic no-replace publication"),
+        "Must return explicit unsupported filesystem error: {}",
+        err_msg
+    );
+
+    // Target must NOT be created via fallback rename or copy
+    assert!(
+        !final_path.exists(),
+        "Target file must not be created when operation is unsupported"
+    );
+    // Source remains untouched for caller cleanup
+    assert!(staging_path.exists(), "Source part file must remain untouched");
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
 }

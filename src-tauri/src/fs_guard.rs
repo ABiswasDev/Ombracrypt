@@ -11,11 +11,11 @@ use zeroize::Zeroizing;
 use crate::crypto::{compute_obk_public_fingerprint, compute_obp_fingerprint};
 use crate::stream::{read_vault_uncompressed_size, CHUNK_SIZE};
 
-/// Maximum permissible size for an .obk or .obp file (8 KiB ceiling prevents OOM DoS)[cite: 33]
+/// Maximum permissible size for an .obk or .obp file (8 KiB ceiling prevents OOM DoS)
 pub const MAX_KEY_FILE_BYTES: u64 = 8192;
 pub const MIN_KEY_FILE_BYTES: u64 = 64;
 
-// Global registry tracking in-flight staging artifacts across threads to prevent cleaner collision[cite: 33]
+// Global registry tracking in-flight staging artifacts across threads to prevent cleaner collision
 static ACTIVE_STAGING_PATHS: Mutex<Option<HashSet<PathBuf>>> = Mutex::new(None);
 
 fn register_active_staging_path(path: PathBuf) {
@@ -53,14 +53,14 @@ pub struct SpaceAssessment {
     pub summary: String,
 }
 
-/// Flushes directory metadata to disk/USB so newly committed files/folders appear immediately[cite: 33]
+/// Flushes directory metadata to disk/USB so newly committed files/folders appear immediately
 pub fn sync_parent_directory(dir: &Path) {
     if let Ok(dir_handle) = File::open(dir) {
         let _ = dir_handle.sync_all();
     }
 }
 
-/// Generates a hidden, CSPRNG-unique staging path so concurrent operations never collide[cite: 33]
+/// Generates a hidden, CSPRNG-unique staging path so concurrent operations never collide
 pub fn unique_staging_path(dir: &Path, base_filename: &str) -> PathBuf {
     let mut rnd = [0u8; 6];
     OsRng.fill_bytes(&mut rnd);
@@ -70,7 +70,7 @@ pub fn unique_staging_path(dir: &Path, base_filename: &str) -> PathBuf {
     ))
 }
 
-/// Creates a staging file for private keys (.obk) with strict 0600 (owner-only) permissions on Unix[cite: 33]
+/// Creates a staging file for private keys (.obk) with strict 0600 (owner-only) permissions on Unix
 pub fn create_private_staging_file(path: &Path) -> Result<File, String> {
     let mut opts = OpenOptions::new();
     opts.write(true).create_new(true);
@@ -86,7 +86,7 @@ pub fn create_private_staging_file(path: &Path) -> Result<File, String> {
     Ok(file)
 }
 
-/// Creates a standard exclusive staging file for public keys (.obp) and encrypted vaults (.obv)[cite: 33]
+/// Creates a standard exclusive staging file for public keys (.obp) and encrypted vaults (.obv)
 pub fn create_public_staging_file(path: &Path) -> Result<File, String> {
     let file = OpenOptions::new()
         .write(true)
@@ -97,7 +97,7 @@ pub fn create_public_staging_file(path: &Path) -> Result<File, String> {
     Ok(file)
 }
 
-/// Creates a CSPRNG-unique extraction staging directory with restrictive 0700 permissions on Unix[cite: 33]
+/// Creates a CSPRNG-unique extraction staging directory with restrictive 0700 permissions on Unix
 pub fn create_secure_staging_dir(out_dir: &Path, file_stem: &str) -> Result<PathBuf, String> {
     let mut rnd = [0u8; 6];
     OsRng.fill_bytes(&mut rnd);
@@ -123,7 +123,7 @@ pub fn create_secure_staging_dir(out_dir: &Path, file_stem: &str) -> Result<Path
     Ok(stage_dir)
 }
 
-/// Scans only the designated target folder for stale Ombracrypt staging remnants and purges them safely[cite: 33]
+/// Scans only the designated target folder for stale Ombracrypt staging remnants and purges them safely
 pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
     if !dir.exists() || !dir.is_dir() {
         return Ok((0, 0));
@@ -139,7 +139,7 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
         let name_str = file_name.to_string_lossy();
 
         if path.is_dir() && name_str.starts_with(".ombracrypt_stage_") {
-            // Never purge directories currently active in any running pipeline thread[cite: 33]
+            // Never purge directories currently active in any running pipeline thread
             if is_staging_path_active(&path) {
                 continue;
             }
@@ -150,7 +150,7 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
                 count += 1;
             }
         } else if path.is_file() && name_str.starts_with('.') && name_str.ends_with(".part") {
-            // Never purge files actively registered or locked by an ongoing write operation[cite: 33]
+            // Never purge files actively registered or locked by an ongoing write operation
             if is_staging_path_active(&path) {
                 continue;
             }
@@ -172,7 +172,7 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
     Ok((count, freed_bytes))
 }
 
-/// Reads an .obk or .obp key file only after enforcing strict minimum and maximum byte bounds[cite: 33]
+/// Reads an .obk or .obp key file only after enforcing strict minimum and maximum byte bounds
 pub fn read_bounded_key_file(path_str: &str, label: &str) -> Result<Zeroizing<Vec<u8>>, String> {
     let file = File::open(path_str)
         .map_err(|_| format!("Authentication Error: {} could not be accessed.", label))?;
@@ -201,7 +201,7 @@ pub fn read_bounded_key_file(path_str: &str, label: &str) -> Result<Zeroizing<Ve
     Ok(buf)
 }
 
-/// RAII Guard that automatically tracks and removes partial staging files on error or early return[cite: 33]
+/// RAII Guard that automatically tracks and removes partial staging files on error or early return
 pub struct TempFileGuard {
     paths: Vec<PathBuf>,
     armed: bool,
@@ -235,7 +235,7 @@ impl Drop for TempFileGuard {
     }
 }
 
-/// RAII Guard that automatically tracks and wipes the temporary extraction staging folder on decryption failure[cite: 33]
+/// RAII Guard that automatically tracks and wipes the temporary extraction staging folder on decryption failure
 pub struct TempDirGuard {
     path: PathBuf,
     armed: bool,
@@ -261,8 +261,154 @@ impl Drop for TempDirGuard {
     }
 }
 
+/// Publishes a staged file to its final destination atomically without replacing an existing file.
+/// Fails closed if the destination exists or if the filesystem does not support no-replace publication.
+pub fn atomic_publish_noreplace(src: &Path, dst: &Path) -> Result<(), String> {
+    atomic_publish_noreplace_internal(src, dst, false)
+}
+
+/// Internal implementation supporting simulated failure testing on CI environments.
+pub fn atomic_publish_noreplace_internal(
+    src: &Path,
+    dst: &Path,
+    simulate_unsupported: bool,
+) -> Result<(), String> {
+    if simulate_unsupported {
+        return Err(format!(
+            "Target filesystem does not support atomic no-replace publication: {}",
+            dst.display()
+        ));
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+
+        let c_src = CString::new(src.as_os_str().as_bytes())
+            .map_err(|e| format!("Invalid path encoding for source: {}", e))?;
+        let c_dst = CString::new(dst.as_os_str().as_bytes())
+            .map_err(|e| format!("Invalid path encoding for destination: {}", e))?;
+
+        let ret = unsafe {
+            libc::renameat2(
+                libc::AT_FDCWD,
+                c_src.as_ptr(),
+                libc::AT_FDCWD,
+                c_dst.as_ptr(),
+                libc::RENAME_NOREPLACE,
+            )
+        };
+
+        if ret != 0 {
+            let err = std::io::Error::last_os_error();
+            return match err.raw_os_error() {
+                Some(libc::EEXIST) => {
+                    Err(format!("Refusing to overwrite existing file: {}", dst.display()))
+                }
+                Some(libc::ENOSYS) | Some(libc::ENOTSUP) => {
+                    Err(format!(
+                        "Target filesystem does not support atomic no-replace publication: {}",
+                        dst.display()
+                    ))
+                }
+                Some(libc::EINVAL) => {
+                    Err(format!(
+                        "Target filesystem returned EINVAL (unsupported flag or invalid arguments) during atomic publication: {}",
+                        err
+                    ))
+                }
+                _ => Err(format!(
+                    "Failed to commit artifact {} via atomic rename: {}",
+                    dst.display(),
+                    err
+                )),
+            };
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+
+        let c_src = CString::new(src.as_os_str().as_bytes())
+            .map_err(|e| format!("Invalid path encoding for source: {}", e))?;
+        let c_dst = CString::new(dst.as_os_str().as_bytes())
+            .map_err(|e| format!("Invalid path encoding for destination: {}", e))?;
+
+        let ret = unsafe {
+            libc::renamex_np(c_src.as_ptr(), c_dst.as_ptr(), libc::RENAME_EXCL)
+        };
+
+        if ret != 0 {
+            let err = std::io::Error::last_os_error();
+            return match err.raw_os_error() {
+                Some(libc::EEXIST) => {
+                    Err(format!("Refusing to overwrite existing file: {}", dst.display()))
+                }
+                Some(libc::ENOTSUP) | Some(libc::ENOSYS) => {
+                    Err(format!(
+                        "Target filesystem does not support atomic no-replace publication: {}",
+                        dst.display()
+                    ))
+                }
+                _ => Err(format!(
+                    "Failed to commit artifact {} via atomic rename: {}",
+                    dst.display(),
+                    err
+                )),
+            };
+        }
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+
+        let wide_src: Vec<u16> = src.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let wide_dst: Vec<u16> = dst.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+
+        let success = unsafe {
+            windows_sys::Win32::Storage::FileSystem::MoveFileExW(
+                wide_src.as_ptr(),
+                wide_dst.as_ptr(),
+                0, // Deliberately omit MOVEFILE_REPLACE_EXISTING
+            )
+        };
+
+        if success == 0 {
+            let err_code = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+            const ERROR_FILE_EXISTS: u32 = 80;
+            const ERROR_ALREADY_EXISTS: u32 = 183;
+            return match err_code {
+                ERROR_FILE_EXISTS | ERROR_ALREADY_EXISTS => {
+                    Err(format!("Refusing to overwrite existing file: {}", dst.display()))
+                }
+                _ => Err(format!(
+                    "Failed to commit artifact {} via MoveFileExW (error code {}): {}",
+                    dst.display(),
+                    err_code,
+                    std::io::Error::from_raw_os_error(err_code as i32)
+                )),
+            };
+        }
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    {
+        Err(format!(
+            "Target platform does not support atomic no-replace publication: {}",
+            dst.display()
+        ))
+    }
+}
+
 /// Transactional Publication Guard: Atomically commits staged files without overwriting existing files,
-/// and rolls back all newly committed artifacts if any step in a multi-file commit fails.[cite: 33]
+/// and rolls back all newly committed artifacts if any step in a multi-file commit fails.
 pub struct CommitRollbackGuard {
     committed: Vec<PathBuf>,
     armed: bool,
@@ -299,7 +445,6 @@ impl CommitRollbackGuard {
             Err(_) => {
                 // Fallback for filesystems without hard-link support (e.g. FAT32, exFAT).
                 // Both part_path and final_path reside in the exact same directory.
-                // Re-verify absence of destination before atomic directory entry move.
                 if fs::symlink_metadata(final_path).is_ok() {
                     return Err(format!(
                         "Refusing to overwrite existing file: {}",
@@ -307,15 +452,8 @@ impl CommitRollbackGuard {
                     ));
                 }
 
-                // fs::rename within the same directory is an atomic directory-entry update.
-                // Unlike a byte copy, rename never exposes a 0-byte placeholder or partially written file.
-                fs::rename(part_path, final_path).map_err(|e| {
-                    format!(
-                        "Failed to commit artifact {} via atomic rename: {}",
-                        final_path.display(),
-                        e
-                    )
-                })?;
+                // Platform-native atomic no-replace publication (never falls back to clobbering renames)
+                atomic_publish_noreplace(part_path, final_path)?;
 
                 self.committed.push(final_path.to_path_buf());
                 Ok(())
@@ -338,7 +476,7 @@ impl Drop for CommitRollbackGuard {
     }
 }
 
-/// Canonicalizes source and destination paths to ensure output/key folders are never inside the input folder[cite: 33]
+/// Canonicalizes source and destination paths to ensure output/key folders are never inside the input folder
 pub fn verify_no_source_overlap(
     source_dir: &Path,
     dest_dir: &Path,
@@ -358,7 +496,7 @@ pub fn verify_no_source_overlap(
     Ok(())
 }
 
-/// Recursively calculates total payload bytes and file count while rejecting symlinks[cite: 33]
+/// Recursively calculates total payload bytes and file count while rejecting symlinks
 pub fn calculate_dir_metrics(path: &Path) -> Result<(u64, u64), String> {
     let meta = fs::symlink_metadata(path).map_err(|e| format!("Cannot access path: {}", e))?;
     if meta.file_type().is_symlink() {
@@ -378,7 +516,7 @@ pub fn calculate_dir_metrics(path: &Path) -> Result<(u64, u64), String> {
     Ok((total_bytes, count))
 }
 
-/// Pre-flight capacity, canonical overlap, path collision, and Key ID fingerprint check[cite: 33]
+/// Pre-flight capacity, canonical overlap, path collision, and Key ID fingerprint check
 pub fn assess_storage_and_paths(
     mode: &str,
     source_path: &str,
