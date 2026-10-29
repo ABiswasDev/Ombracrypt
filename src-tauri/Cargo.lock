@@ -2563,6 +2563,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "ombracrypt"
+version = "2.0.0-beta"
+dependencies = [
+ "aes-gcm",
+ "argon2",
+ "chacha20poly1305",
+ "fips203",
+ "fs2",
+ "hkdf",
+ "rand",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sha3",
+ "subtle",
+ "tar",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "x25519-dalek",
+ "zeroize",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3766,31 +3791,6 @@ dependencies = [
  "webview2-com",
  "window-vibrancy",
  "windows",
-]
-
-[[package]]
-name = "tauri-app"
-version = "2.0.0-beta"
-dependencies = [
- "aes-gcm",
- "argon2",
- "chacha20poly1305",
- "fips203",
- "fs2",
- "hkdf",
- "rand",
- "serde",
- "serde_json",
- "sha2",
- "sha3",
- "subtle",
- "tar",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "x25519-dalek",
- "zeroize",
 ]
 
 [[package]]

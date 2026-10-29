@@ -11,8 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-2d2d2d?style=for-the-badge" alt="Platform">
   <img src="https://img.shields.io/badge/Security-Post--Quantum%20Hybrid%20KEM-blue?style=for-the-badge" alt="Security">
-  <img src="https://img.shields.io/badge/Streaming-Zero--Disk%20Remanence-success?style=for-the-badge" alt="Streaming">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-28a745?style=for-the-badge" alt="License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-CAL--1.0-28a745?style=for-the-badge" alt="License"></a>
 </p>
 
 ---
@@ -191,7 +190,8 @@ When generating a private key (`.obk`), the user can define an optional **Decept
 * **Compromised Host Operating Systems:** Ombracrypt cannot protect against active kernel rootkits, physical memory scrapers, hardware keyloggers, or compromised display servers.
 * **Credential Recovery:** Absolute zero-knowledge design. There are no recovery phrases, escrow mechanisms, or master administrative overrides. Forgotten passwords or lost `.obk` files result in unrecoverable data.
 * **Offline Trapdoor Extraction:** The Duress Trapdoor is an interactive behavioral defense. An adversary with offline access to both the `.obk` file and the vault can inspect or strip the Phantom Block prior to attempting brute-force attacks.
-
+* **NAND Flash Wear-Leveling Residue:** The Duress Trapdoor overwrites the `.obk` file with CSPRNG noise. On modern SSDs and flash storage with internal wear leveling, underlying controller remapping may retain latent physical sectors until hardware garbage collection or TRIM runs.
+* **Decryption Crash Residue:** While encryption streams without ever creating a temporary archive on disk, decryption unpacks validated plaintext to a restricted local staging folder before moving it to the destination. A forced crash or sudden power failure during extraction may leave partial plaintext files in that staging area.
 ---
 
 ## Verification & Conformance Test Suite
@@ -295,5 +295,5 @@ ombracrypt/
 
 ## License & Legal Terms
 
-* **GNU Affero General Public License v3.0 (AGPL-3.0):** Ombracrypt is licensed under the AGPL-3.0. You are free to inspect, modify, and redistribute this software, provided that any derivative work or network-hosted service built on this codebase is published under the exact same AGPL-3.0 license terms with full source code availability. Closed-source commercialization and proprietary distribution are strictly prohibited.
+* **Cryptographic Autonomy License 1.0 (CAL-1.0):** Ombracrypt is open-source software licensed under the Cryptographic Autonomy License (CAL-1.0). You are free to inspect, modify, and redistribute this software. Any deployment or derivative service offered over a network legally requires providing users access to the source code, their data, and their cryptographic keys/credentials, guaranteeing data sovereignty without vendor lock-in.
 * **Cryptographic & Research Notice:** Ombracrypt is designed for defensive personal data sovereignty. The maintainers assume zero liability for data loss resulting from forgotten passwords, lost key files, or unauthorized use. Users are solely responsible for ensuring compliance with cryptographic import, export, and usage regulations in their respective jurisdictions.
