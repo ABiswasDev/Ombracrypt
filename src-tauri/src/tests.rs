@@ -77,6 +77,10 @@ fn test_roundtrip_xwing_xchacha20_and_zero_temp_files() {
 
     let recovered = fs::read(extract_dir.join("sample_payload/nested/secret.txt")).unwrap();
     assert_eq!(recovered, secret_data);
+    assert!(
+        !extract_dir.join("sample_payload/.active.lock").exists(),
+        "Internal .active.lock sentinel must never leak into extracted output"
+    );
 }
 
 #[test]
@@ -124,6 +128,10 @@ fn test_roundtrip_cypherpunk_aes256gcm() {
 
     let restored = fs::read(extract_dir.join("alpha/large.bin")).unwrap();
     assert_eq!(restored, payload);
+    assert!(
+        !extract_dir.join("alpha/.active.lock").exists(),
+        "Internal .active.lock sentinel must never leak into extracted output"
+    );
 }
 
 #[test]
@@ -1576,7 +1584,6 @@ fn test_fs_guard_concurrent_two_publishers_collision_barrier() {
     let res_a = handle_a.join().unwrap();
     let res_b = handle_b.join().unwrap();
 
-    // Exactly one operation must succeed, and exactly one must fail closed with collision refusal
     let (ok_count, err_count) = match (&res_a, &res_b) {
         (Ok(()), Err(e)) | (Err(e), Ok(())) => {
             assert!(
@@ -1590,16 +1597,77 @@ fn test_fs_guard_concurrent_two_publishers_collision_barrier() {
     };
     assert_eq!((ok_count, err_count), (1, 1), "Exactly one concurrent publication must succeed");
 
-    // The destination file must be byte-for-byte identical to the winner's payload (never truncated or corrupted)
     let winner_bytes = fs::read(&final_target).unwrap();
     assert!(
         winner_bytes == payload_a || winner_bytes == payload_b,
         "Published vault must match winner payload completely"
     );
 
-    // The winning staging file was consumed; the losing staging file remains intact
     let remaining_parts = (if part_a.exists() { 1 } else { 0 }) + (if part_b.exists() { 1 } else { 0 });
     assert_eq!(remaining_parts, 1, "Only the loser's staging file remains intact");
+}
+
+#[test]
+fn test_fs_guard_concurrent_two_directory_publishers_collision_barrier() {
+    let (ws, _guard) = create_test_workspace("concurrent_dir_publishers");
+    let final_target = ws.join("contended_extracted_dir");
+
+    let stage_a = ws.join(".ombracrypt_stage_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    let stage_b = ws.join(".ombracrypt_stage_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+
+    fs::create_dir_all(&stage_a).unwrap();
+    fs::create_dir_all(&stage_b).unwrap();
+
+    let payload_a = b"PAYLOAD_VERSION_A";
+    let payload_b = b"PAYLOAD_VERSION_B";
+
+    fs::write(stage_a.join("data.txt"), payload_a).unwrap();
+    fs::write(stage_b.join("data.txt"), payload_b).unwrap();
+
+    let barrier = Arc::new(Barrier::new(2));
+
+    let stage_a_clone = stage_a.clone();
+    let final_target_clone1 = final_target.clone();
+    let barrier_clone1 = barrier.clone();
+
+    let handle_a = thread::spawn(move || {
+        barrier_clone1.wait();
+        atomic_publish_dir_noreplace(&stage_a_clone, &final_target_clone1)
+    });
+
+    let stage_b_clone = stage_b.clone();
+    let final_target_clone2 = final_target.clone();
+    let barrier_clone2 = barrier.clone();
+
+    let handle_b = thread::spawn(move || {
+        barrier_clone2.wait();
+        atomic_publish_dir_noreplace(&stage_b_clone, &final_target_clone2)
+    });
+
+    let res_a = handle_a.join().unwrap();
+    let res_b = handle_b.join().unwrap();
+
+    let (ok_count, err_count) = match (&res_a, &res_b) {
+        (Ok(()), Err(e)) | (Err(e), Ok(())) => {
+            assert!(
+                e.contains("Refusing to overwrite existing destination"),
+                "Losing directory publisher must fail with collision refusal: {}",
+                e
+            );
+            (1, 1)
+        }
+        _ => (0, 0),
+    };
+    assert_eq!((ok_count, err_count), (1, 1), "Exactly one concurrent directory publication must succeed");
+
+    let winner_bytes = fs::read(final_target.join("data.txt")).unwrap();
+    assert!(
+        winner_bytes == payload_a || winner_bytes == payload_b,
+        "Published directory content must match winner payload completely"
+    );
+
+    let remaining_stages = (if stage_a.exists() { 1 } else { 0 }) + (if stage_b.exists() { 1 } else { 0 });
+    assert_eq!(remaining_stages, 1, "Only the loser's staging directory remains intact");
 }
 
 #[test]
@@ -1629,7 +1697,6 @@ fn test_fs_guard_active_locked_extraction_dir_skipped_by_cleaner() {
     assert!(sentinel_path.exists());
     assert!(stage_dir.join("extracted_chunk.bin").exists());
 
-    // Release lock handle
     drop(sentinel_file);
 }
 
@@ -1646,6 +1713,9 @@ fn test_fs_guard_stale_extraction_dir_purged_when_lock_released() {
         .create_new(true)
         .open(&sentinel_path)
         .unwrap();
+
+    // Genuinely acquire exclusive lock before releasing handle
+    sentinel_file.try_lock_exclusive().unwrap();
 
     fs::write(stage_dir.join("stale_file.bin"), vec![0x88u8; 2048]).unwrap();
 

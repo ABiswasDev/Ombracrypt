@@ -227,23 +227,50 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
             }
             #[cfg(not(unix))]
             {
-                // On Windows, delete inner files, delete sentinel, drop lock handle, then delete parent dir
-                if let Ok(sub_entries) = fs::read_dir(&path) {
-                    for sub_entry in sub_entries.flatten() {
-                        let sub_path = sub_entry.path();
-                        if sub_path.file_name().and_then(|s| s.to_str()) != Some(".active.lock") {
-                            if sub_path.is_dir() {
-                                let _ = fs::remove_dir_all(&sub_path);
-                            } else {
-                                let _ = fs::remove_file(&sub_path);
+                // On Windows: Delete inner files, then delete sentinel, drop lock handle, and remove parent dir.
+                // Strict invariant: Never remove .active.lock if any child deletion or enumeration fails.
+                let mut all_children_removed = true;
+                match fs::read_dir(&path) {
+                    Ok(sub_entries) => {
+                        for sub_res in sub_entries {
+                            match sub_res {
+                                Ok(sub_entry) => {
+                                    let sub_path = sub_entry.path();
+                                    if sub_path.file_name().and_then(|s| s.to_str()) != Some(".active.lock") {
+                                        let del_res = if sub_path.is_dir() {
+                                            fs::remove_dir_all(&sub_path)
+                                        } else {
+                                            fs::remove_file(&sub_path)
+                                        };
+                                        if del_res.is_err() {
+                                            all_children_removed = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                                Err(_) => {
+                                    all_children_removed = false;
+                                    break;
+                                }
                             }
                         }
                     }
+                    Err(_) => {
+                        all_children_removed = false;
+                    }
                 }
-                let _ = fs::remove_file(&sentinel_path);
-                drop(sentinel_file);
-                if fs::remove_dir(&path).is_ok() {
-                    count += 1;
+
+                if all_children_removed {
+                    if fs::remove_file(&sentinel_path).is_ok() {
+                        drop(sentinel_file);
+                        if fs::remove_dir(&path).is_ok() {
+                            count += 1;
+                        }
+                    } else {
+                        drop(sentinel_file);
+                    }
+                } else {
+                    drop(sentinel_file);
                 }
             }
         } else if meta.is_file() && is_valid_staging_file_name(&name_str) {
@@ -366,13 +393,16 @@ impl TempDirGuard {
         }
     }
 
-    /// Releases and unlinks the sentinel file cleanly before publication so the target output remains clean
-    pub fn release_sentinel(&mut self) {
-        if let Some(lock) = self.sentinel_lock.take() {
-            drop(lock);
+    /// Releases and unlinks the sentinel file cleanly before publication so the target output remains clean.
+    /// Retains ownership of the lock descriptor if unlinking fails to guarantee fail-closed teardown.
+    pub fn release_sentinel(&mut self) -> Result<(), String> {
+        if self.sentinel_lock.is_some() {
             let sentinel_path = self.path.join(".active.lock");
-            let _ = fs::remove_file(&sentinel_path);
+            fs::remove_file(&sentinel_path)
+                .map_err(|e| format!("Security Error: Failed to remove staging sentinel: {}", e))?;
+            self.sentinel_lock = None;
         }
+        Ok(())
     }
 
     pub fn disarm(&mut self) {

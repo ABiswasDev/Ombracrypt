@@ -481,8 +481,9 @@ pub fn decrypt_vault_core(
         );
     }
 
-    // Release and unlink the internal .active.lock sentinel immediately before directory rename
-    dir_guard.release_sentinel();
+    // Release and unlink the internal .active.lock sentinel immediately before directory rename.
+    // If removal fails, this call returns Err and dir_guard cleans up the entire tree.
+    dir_guard.release_sentinel()?;
 
     atomic_publish_dir_noreplace(&stage_dir, &final_extract_dir)
         .map_err(|e| format!("Failed to finalize extracted output directory: {}", e))?;
