@@ -1,13 +1,14 @@
 use rand::{rngs::OsRng, RngCore};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tar::EntryType;
 
 use crate::fs_guard::{
-    clean_scoped_staging_dir, read_bounded_key_file, CommitRollbackGuard, TempDirGuard,
-    MAX_KEY_FILE_BYTES,
+    atomic_publish_dir_noreplace, clean_scoped_staging_dir, create_public_staging_file,
+    read_bounded_key_file, CommitRollbackGuard, TempDirGuard, MAX_KEY_FILE_BYTES,
 };
 use crate::pipeline::{decrypt_vault_core, encrypt_vault_core};
 use crate::stream::{sanitize_tar_path, validate_tar_entry_type, CHUNK_SIZE};
@@ -1039,7 +1040,7 @@ fn test_sprint8_mid_stream_cancellation_cleans_staging_artifacts() {
     let large_payload = vec![0x33u8; CHUNK_SIZE * 3];
     fs::write(src.join("payload.dat"), &large_payload).unwrap();
 
-    let cancel_flag = Arc::new(AtomicBool::new(true)); // Pre-trip cancellation flag
+    let cancel_flag = Arc::new(AtomicBool::new(true));
 
     let res = encrypt_vault_core(
         None,
@@ -1068,21 +1069,27 @@ fn test_sprint8_mid_stream_cancellation_cleans_staging_artifacts() {
 fn test_sprint8_scoped_cleaner_purges_only_matching_artifacts() {
     let (ws, _guard) = create_test_workspace("scoped_cleaner");
     let legit_file = ws.join("important_user_doc.txt");
-    let stale_part = ws.join(".abandoned.obv.123456.part");
-    let stale_stage = ws.join(".ombracrypt_stage_data_abcdef");
+    let unrelated_part = ws.join(".abandoned.obv.123456.part");
+    let stale_part = ws.join(".ombracrypt_part_0123456789abcdef0123456789abcdef.part");
+    let stale_stage = ws.join(".ombracrypt_stage_0123456789abcdef0123456789abcdef");
 
     fs::write(&legit_file, b"KEEP THIS FILE").unwrap();
+    fs::write(&unrelated_part, vec![0u8; 1024]).unwrap();
     fs::write(&stale_part, vec![0u8; 1024]).unwrap();
     fs::create_dir_all(stale_stage.join("nested")).unwrap();
     fs::write(stale_stage.join("nested/junk.txt"), vec![0u8; 2048]).unwrap();
 
     let (cleaned, freed) = clean_scoped_staging_dir(&ws).unwrap();
-    assert_eq!(cleaned, 2);
+    assert_eq!(cleaned, 2, "Only Ombracrypt staging artifacts must be purged");
     assert_eq!(freed, 3072);
 
     assert!(legit_file.exists(), "Legitimate files must not be touched");
-    assert!(!stale_part.exists());
-    assert!(!stale_stage.exists());
+    assert!(
+        unrelated_part.exists(),
+        "Unrelated hidden .part files must be strictly preserved"
+    );
+    assert!(!stale_part.exists(), "Stale Ombracrypt staging part file must be purged");
+    assert!(!stale_stage.exists(), "Stale Ombracrypt staging dir must be purged");
 }
 
 #[test]
@@ -1120,28 +1127,23 @@ fn test_sprint9_canonical_xwing_obk_86_bytes_and_seed_decapsulation() {
         crate::crypto::generate_keypair_blobs("xwing", "DuressTest123").unwrap();
 
     assert_eq!(kem_id, 1);
-    // Canonical X-Wing Profile 1: 5B magic + 1B kem_id + 16B salt + 32B seed + 32B phantom block = 86 bytes
     assert_eq!(
         obk_bytes.len(),
         86,
-        "Canonical X-Wing .obk private key must be exactly 86 bytes (32-byte seed representation)"
+        "Canonical X-Wing .obk private key must be exactly 86 bytes"
     );
-
-    // .obp Public Key: 5B magic + 1B kem_id + 1184B ML-KEM-768 ek + 32B X25519 pk = 1222 bytes
     assert_eq!(
         obp_bytes.len(),
         1222,
         "X-Wing .obp public key must be exactly 1222 bytes"
     );
 
-    // Public and Private key fingerprints must match
     let pub_fp = crate::crypto::compute_obp_fingerprint(&obp_bytes).unwrap();
     let priv_fp = crate::crypto::compute_obk_public_fingerprint(&obk_bytes).unwrap();
     assert_eq!(pub_fp, priv_fp);
 
-    // Deterministic encapsulation & decapsulation
     let (ct, ss_enc, _) = crate::crypto::encapsulate_with_obp(&obp_bytes).unwrap();
-    assert_eq!(ct.len(), 1088 + 32); // 1120 bytes
+    assert_eq!(ct.len(), 1088 + 32);
     assert_eq!(ss_enc.len(), 32);
 
     let (duress, ss_dec_opt) =
@@ -1149,7 +1151,6 @@ fn test_sprint9_canonical_xwing_obk_86_bytes_and_seed_decapsulation() {
     assert!(!duress);
     assert_eq!(*ss_dec_opt.unwrap(), *ss_enc);
 
-    // Trigger duress on the 86-byte key
     let (duress_triggered, _) =
         crate::crypto::decapsulate_with_obk(1, &obk_bytes, &ct, "DuressTest123").unwrap();
     assert!(duress_triggered, "Duress trapdoor must trigger on matching duress passcode");
@@ -1162,9 +1163,6 @@ fn test_sprint9_xwing_combiner_specification_kat() {
     let ct_x = [0x3Cu8; 32];
     let pk_x = [0xC3u8; 32];
 
-    // Independent FIPS 202 SHA3-256 Known-Answer Test literal
-    // Formula per draft-connolly-cfrg-xwing-kem §5:
-    // ss = SHA3-256(ss_m || ss_x || ct_x || pk_x || r"\.//^\")
     let expected_ss: [u8; 32] = [
         0xD1u8, 0xD4u8, 0x29u8, 0x83u8, 0x7Bu8, 0x23u8, 0x79u8, 0xF1u8,
         0x95u8, 0xE5u8, 0x42u8, 0x4Eu8, 0x5Au8, 0x59u8, 0x1Fu8, 0xDEu8,
@@ -1217,7 +1215,7 @@ fn test_sprint9_decryption_cancellation_sanitized_message() {
     let obv_path = vault_dir.join("src.obv");
     let obk_path = key_dir.join("src.obk");
 
-    let cancel_flag = Arc::new(AtomicBool::new(true)); // Pre-tripped cancellation
+    let cancel_flag = Arc::new(AtomicBool::new(true));
     let res = decrypt_vault_core(
         None,
         obv_path.to_str().unwrap(),
@@ -1244,6 +1242,7 @@ fn test_sprint9_decryption_cancellation_sanitized_message() {
 // =========================================================================
 // SPRINT 10 INDEPENDENT SPECIFICATION REFERENCE KAT
 // =========================================================================
+
 #[test]
 fn test_sprint10_xwing_independent_reference_kat() {
     const EXPECTED_PUBLIC_KEY: &[u8] =
@@ -1253,7 +1252,6 @@ fn test_sprint10_xwing_independent_reference_kat() {
     const EXPECTED_SHARED_SECRET: &[u8] =
         include_bytes!("../tests/fixtures/xwing_revision11/shared_secret.bin");
 
-    // Fixed input values shared with the independent Go/CIRCL harness
     let seed = [0x42u8; 32];
     let ephem_seed = [0x99u8; 64];
 
@@ -1284,7 +1282,6 @@ fn test_sprint10_xwing_independent_reference_kat() {
         "X-Wing shared secret differs from independent reference fixture"
     );
 
-    // Complementary local decapsulation, duress, and implicit-rejection checks
     let (duress, ss_dec_opt) = crate::crypto::decapsulate_with_obk(
         1,
         &obk,
@@ -1321,7 +1318,9 @@ fn test_sprint10_xwing_independent_reference_kat() {
     );
 }
 
-
+// =========================================================================
+// FILESYSTEM ATOMIC NO-REPLACE & SCOPED STAGING REGRESSION SUITE
+// =========================================================================
 
 #[test]
 fn test_fs_guard_atomic_no_replace_publishes_successfully() {
@@ -1358,9 +1357,7 @@ fn test_fs_guard_atomic_no_replace_prevents_destination_overwrite() {
     let staging_path = temp_dir.join(".malicious_clobber.part");
     let final_path = temp_dir.join("critical_data.obv");
 
-    // Establish pre-existing destination file
     std::fs::write(&final_path, b"PRE_EXISTING_IMMUTABLE_VAULT").unwrap();
-    // Staged incoming replacement
     std::fs::write(&staging_path, b"OVERWRITE_ATTEMPT_DATA").unwrap();
 
     let res = crate::fs_guard::atomic_publish_noreplace(&staging_path, &final_path);
@@ -1375,14 +1372,12 @@ fn test_fs_guard_atomic_no_replace_prevents_destination_overwrite() {
         err_msg
     );
 
-    // Destination file must remain 100% unaltered
     let dest_content = std::fs::read(&final_path).unwrap();
     assert_eq!(
         dest_content, b"PRE_EXISTING_IMMUTABLE_VAULT",
         "Pre-existing destination file was clobbered or truncated!"
     );
 
-    // Staged source must remain intact so caller's RAII guard manages cleanup
     assert!(
         staging_path.exists(),
         "Staged source file must remain intact upon publication error"
@@ -1404,7 +1399,6 @@ fn test_fs_guard_atomic_no_replace_fails_closed_on_unsupported_fs() {
 
     std::fs::write(&staging_path, b"STAGED_PAYLOAD").unwrap();
 
-    // Injected simulated unsupported syscall error
     let res =
         crate::fs_guard::atomic_publish_noreplace_internal(&staging_path, &final_path, true);
     assert!(
@@ -1418,13 +1412,126 @@ fn test_fs_guard_atomic_no_replace_fails_closed_on_unsupported_fs() {
         err_msg
     );
 
-    // Target must NOT be created via fallback rename or copy
     assert!(
         !final_path.exists(),
         "Target file must not be created when operation is unsupported"
     );
-    // Source remains untouched for caller cleanup
     assert!(staging_path.exists(), "Source part file must remain untouched");
 
     let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_fs_guard_active_locked_staging_file_skipped_by_cleaner() {
+    let (ws, _guard) = create_test_workspace("locked_cleaner");
+    let active_part = ws.join(".ombracrypt_part_11112222333344445555666677778888.part");
+
+    // Hold exclusive lock through create_public_staging_file
+    let mut locked_file = create_public_staging_file(&active_part).unwrap();
+    locked_file.write_all(&vec![0xEEu8; 512]).unwrap();
+    locked_file.sync_all().unwrap();
+
+    // Verify cleaner does not unlink the file while lock is held
+    let (cleaned, freed) = clean_scoped_staging_dir(&ws).unwrap();
+    assert_eq!(cleaned, 0, "Active locked staging file must NOT be purged");
+    assert_eq!(freed, 0);
+    assert!(active_part.exists(), "Active staging file must remain intact");
+
+    // Release writer lock handle
+    drop(locked_file);
+
+    // Cleaner should now acquire lock and purge the orphaned file
+    let (cleaned_after, freed_after) = clean_scoped_staging_dir(&ws).unwrap();
+    assert_eq!(cleaned_after, 1, "Unlocked staging file must now be purged");
+    assert_eq!(freed_after, 512);
+    assert!(!active_part.exists());
+}
+
+#[test]
+fn test_fs_guard_atomic_dir_publication_publishes_successfully() {
+    let (ws, _guard) = create_test_workspace("dir_publish_ok");
+    let stage_dir = ws.join(".ombracrypt_stage_11112222333344445555666677778888");
+    let final_dir = ws.join("final_extracted_vault");
+
+    fs::create_dir_all(stage_dir.join("subdir")).unwrap();
+    fs::write(stage_dir.join("subdir/file.txt"), b"EXTRACTED_CONTENT").unwrap();
+
+    let res = atomic_publish_dir_noreplace(&stage_dir, &final_dir);
+    assert!(res.is_ok(), "Directory publication must succeed on clean target");
+
+    assert!(final_dir.exists(), "Final directory must exist");
+    assert!(final_dir.join("subdir/file.txt").exists());
+    assert_eq!(
+        fs::read(final_dir.join("subdir/file.txt")).unwrap(),
+        b"EXTRACTED_CONTENT"
+    );
+    assert!(!stage_dir.exists(), "Staging directory must be moved");
+}
+
+#[test]
+fn test_fs_guard_atomic_dir_publication_prevents_overwrite_of_existing_dir() {
+    let (ws, _guard) = create_test_workspace("dir_collision");
+    let stage_dir = ws.join(".ombracrypt_stage_11112222333344445555666677778888");
+    let final_dir = ws.join("existing_target_dir");
+
+    fs::create_dir_all(&stage_dir).unwrap();
+    fs::write(stage_dir.join("new_file.txt"), b"NEW_DATA").unwrap();
+
+    // Destination directory already exists
+    fs::create_dir_all(&final_dir).unwrap();
+
+    let res = atomic_publish_dir_noreplace(&stage_dir, &final_dir);
+    assert!(
+        res.is_err(),
+        "Directory publication must fail closed when destination directory already exists"
+    );
+    let err_msg = res.unwrap_err();
+    assert!(
+        err_msg.contains("Refusing to overwrite existing destination"),
+        "Error must cite refusal to overwrite existing destination: {}",
+        err_msg
+    );
+
+    assert!(stage_dir.exists(), "Staging directory must remain intact");
+    assert!(!final_dir.join("new_file.txt").exists(), "Existing directory must not be clobbered");
+}
+
+#[test]
+fn test_fs_guard_atomic_dir_publication_prevents_overwrite_of_file() {
+    let (ws, _guard) = create_test_workspace("dir_file_collision");
+    let stage_dir = ws.join(".ombracrypt_stage_11112222333344445555666677778888");
+    let final_path = ws.join("existing_file");
+
+    fs::create_dir_all(&stage_dir).unwrap();
+    fs::write(&final_path, b"DO_NOT_OVERWRITE").unwrap();
+
+    let res = atomic_publish_dir_noreplace(&stage_dir, &final_path);
+    assert!(res.is_err(), "Must fail closed if destination is an existing file");
+    assert_eq!(fs::read(&final_path).unwrap(), b"DO_NOT_OVERWRITE");
+    assert!(stage_dir.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn test_fs_guard_atomic_dir_publication_rejects_dangling_symlink() {
+    let (ws, _guard) = create_test_workspace("dir_dangling_symlink");
+    let stage_dir = ws.join(".ombracrypt_stage_11112222333344445555666677778888");
+    let final_dir = ws.join("dangling_link");
+
+    fs::create_dir_all(&stage_dir).unwrap();
+    let nonexistent_target = ws.join("nonexistent_target");
+    std::os::unix::fs::symlink(&nonexistent_target, &final_dir).unwrap();
+
+    let res = atomic_publish_dir_noreplace(&stage_dir, &final_dir);
+    assert!(
+        res.is_err(),
+        "Must fail closed when destination is a dangling symlink"
+    );
+    let err_msg = res.unwrap_err();
+    assert!(
+        err_msg.contains("Refusing to overwrite existing destination"),
+        "Must refuse overwrite: {}",
+        err_msg
+    );
+    assert!(stage_dir.exists());
 }

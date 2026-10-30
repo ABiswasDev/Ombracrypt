@@ -60,14 +60,11 @@ pub fn sync_parent_directory(dir: &Path) {
     }
 }
 
-/// Generates a hidden, CSPRNG-unique staging path so concurrent operations never collide
-pub fn unique_staging_path(dir: &Path, base_filename: &str) -> PathBuf {
-    let mut rnd = [0u8; 6];
+/// Generates a hidden, CSPRNG-unique staging path with strict .ombracrypt_part_ namespace
+pub fn unique_staging_path(dir: &Path, _base_filename: &str) -> PathBuf {
+    let mut rnd = [0u8; 16];
     OsRng.fill_bytes(&mut rnd);
-    dir.join(format!(
-        ".{}.{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}.part",
-        base_filename, rnd[0], rnd[1], rnd[2], rnd[3], rnd[4], rnd[5]
-    ))
+    dir.join(format!(".ombracrypt_part_{:032x}.part", u128::from_be_bytes(rnd)))
 }
 
 /// Creates a staging file for private keys (.obk) with strict 0600 (owner-only) permissions on Unix
@@ -82,7 +79,11 @@ pub fn create_private_staging_file(path: &Path) -> Result<File, String> {
     let file = opts
         .open(path)
         .map_err(|e| format!("Failed to create private key staging file: {}", e))?;
-    let _ = file.try_lock_exclusive();
+    if let Err(e) = file.try_lock_exclusive() {
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(format!("Failed to acquire exclusive lock on staging file: {}", e));
+    }
     Ok(file)
 }
 
@@ -93,17 +94,21 @@ pub fn create_public_staging_file(path: &Path) -> Result<File, String> {
         .create_new(true)
         .open(path)
         .map_err(|e| format!("Failed to create staging file: {}", e))?;
-    let _ = file.try_lock_exclusive();
+    if let Err(e) = file.try_lock_exclusive() {
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(format!("Failed to acquire exclusive lock on staging file: {}", e));
+    }
     Ok(file)
 }
 
 /// Creates a CSPRNG-unique extraction staging directory with restrictive 0700 permissions on Unix
-pub fn create_secure_staging_dir(out_dir: &Path, file_stem: &str) -> Result<PathBuf, String> {
-    let mut rnd = [0u8; 6];
+pub fn create_secure_staging_dir(out_dir: &Path, _file_stem: &str) -> Result<PathBuf, String> {
+    let mut rnd = [0u8; 16];
     OsRng.fill_bytes(&mut rnd);
     let stage_dir = out_dir.join(format!(
-        ".ombracrypt_stage_{}_{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        file_stem, rnd[0], rnd[1], rnd[2], rnd[3], rnd[4], rnd[5]
+        ".ombracrypt_stage_{:032x}",
+        u128::from_be_bytes(rnd)
     ));
 
     #[cfg(unix)]
@@ -138,7 +143,15 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
         let file_name = entry.file_name();
         let name_str = file_name.to_string_lossy();
 
-        if path.is_dir() && name_str.starts_with(".ombracrypt_stage_") {
+        // Reject symlinks without traversing them
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if meta.file_type().is_symlink() {
+            continue;
+        }
+
+        if meta.is_dir() && name_str.starts_with(".ombracrypt_stage_") {
             // Never purge directories currently active in any running pipeline thread
             if is_staging_path_active(&path) {
                 continue;
@@ -149,22 +162,33 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
             if fs::remove_dir_all(&path).is_ok() {
                 count += 1;
             }
-        } else if path.is_file() && name_str.starts_with('.') && name_str.ends_with(".part") {
-            // Never purge files actively registered or locked by an ongoing write operation
+        } else if meta.is_file()
+            && name_str.starts_with(".ombracrypt_part_")
+            && name_str.ends_with(".part")
+        {
+            // Never purge files actively registered in memory by an ongoing write operation
             if is_staging_path_active(&path) {
                 continue;
             }
-            if let Ok(file) = OpenOptions::new().read(true).write(true).open(&path) {
-                if file.try_lock_exclusive().is_err() {
-                    continue;
-                }
+
+            // Attempt to open the candidate file
+            let Ok(file) = OpenOptions::new().read(true).write(true).open(&path) else {
+                continue;
+            };
+
+            // Skip files held by an active writer
+            if file.try_lock_exclusive().is_err() {
+                continue;
             }
-            if let Ok(meta) = path.metadata() {
-                freed_bytes = freed_bytes.saturating_add(meta.len());
-            }
+
+            let file_len = meta.len();
+
+            // Unlink while the exclusive lock handle remains active in scope
             if fs::remove_file(&path).is_ok() {
+                freed_bytes = freed_bytes.saturating_add(file_len);
                 count += 1;
             }
+            drop(file);
         }
     }
 
@@ -259,6 +283,27 @@ impl Drop for TempDirGuard {
             let _ = fs::remove_dir_all(&self.path);
         }
     }
+}
+
+/// Publishes an extraction staging directory to its final destination atomically without replacing an existing directory or file.
+/// Fails closed if the destination exists (including dangling symlinks) or if the filesystem does not support no-replace publication.
+pub fn atomic_publish_dir_noreplace(src: &Path, dst: &Path) -> Result<(), String> {
+    // Detect existing destination before rename to catch dangling symlinks and collisions upfront
+    if fs::symlink_metadata(dst).is_ok() {
+        return Err(format!(
+            "Refusing to overwrite existing destination: {}",
+            dst.display()
+        ));
+    }
+
+    // Use platform-native atomic no-replace publication
+    atomic_publish_noreplace_internal(src, dst, false).map_err(|e| {
+        if e.contains("Refusing to overwrite existing") {
+            format!("Refusing to overwrite existing destination: {}", dst.display())
+        } else {
+            e
+        }
+    })
 }
 
 /// Publishes a staged file to its final destination atomically without replacing an existing file.

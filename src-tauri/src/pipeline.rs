@@ -1,5 +1,5 @@
 use rand::{rngs::OsRng, RngCore};
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -11,9 +11,10 @@ use zeroize::Zeroizing;
 use crate::crypto;
 use crate::deception;
 use crate::fs_guard::{
-    assess_storage_and_paths, create_private_staging_file, create_public_staging_file,
-    create_secure_staging_dir, read_bounded_key_file, sync_parent_directory, unique_staging_path,
-    verify_no_source_overlap, CommitRollbackGuard, TempDirGuard, TempFileGuard,
+    assess_storage_and_paths, atomic_publish_dir_noreplace, create_private_staging_file,
+    create_public_staging_file, create_secure_staging_dir, read_bounded_key_file,
+    sync_parent_directory, unique_staging_path, verify_no_source_overlap, CommitRollbackGuard,
+    TempDirGuard, TempFileGuard,
 };
 use crate::stream::{
     build_and_hash_header, emit_progress, extract_tar_archive_safely, parse_and_validate_header,
@@ -480,13 +481,7 @@ pub fn decrypt_vault_core(
         );
     }
 
-    if final_extract_dir.exists() {
-        return Err(format!(
-            "Refusing to overwrite existing destination directory: {}",
-            final_extract_dir.display()
-        ));
-    }
-    fs::rename(&stage_dir, &final_extract_dir)
+    atomic_publish_dir_noreplace(&stage_dir, &final_extract_dir)
         .map_err(|e| format!("Failed to finalize extracted output directory: {}", e))?;
     sync_parent_directory(&final_extract_dir);
     sync_parent_directory(out_dir_obj);
