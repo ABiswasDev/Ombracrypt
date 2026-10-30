@@ -413,8 +413,8 @@ pub fn decrypt_vault_core(
         .ok_or("Invalid vault filename.")?;
 
     let final_extract_dir = out_dir_obj.join(file_stem);
-    let stage_dir = create_secure_staging_dir(out_dir_obj, file_stem)?;
-    let mut dir_guard = TempDirGuard::new(stage_dir.clone());
+    let (stage_dir, sentinel_lock) = create_secure_staging_dir(out_dir_obj, file_stem)?;
+    let mut dir_guard = TempDirGuard::with_sentinel(stage_dir.clone(), sentinel_lock);
 
     let header_end_pos = vault_file.stream_position().map_err(|e| e.to_string())?;
     let vault_body_size = total_vault_len.saturating_sub(header_end_pos);
@@ -480,6 +480,9 @@ pub fn decrypt_vault_core(
             "Integrity Error: Vault stream ended without a verified final chunk tag.".to_string(),
         );
     }
+
+    // Release and unlink the internal .active.lock sentinel immediately before directory rename
+    dir_guard.release_sentinel();
 
     atomic_publish_dir_noreplace(&stage_dir, &final_extract_dir)
         .map_err(|e| format!("Failed to finalize extracted output directory: {}", e))?;

@@ -1,14 +1,17 @@
 use rand::{rngs::OsRng, RngCore};
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
+use std::thread;
 use tar::EntryType;
+use fs2::FileExt;
 
 use crate::fs_guard::{
-    atomic_publish_dir_noreplace, clean_scoped_staging_dir, create_public_staging_file,
-    read_bounded_key_file, CommitRollbackGuard, TempDirGuard, MAX_KEY_FILE_BYTES,
+    atomic_publish_dir_noreplace, atomic_publish_noreplace, clean_scoped_staging_dir,
+    create_public_staging_file, read_bounded_key_file, CommitRollbackGuard, TempDirGuard,
+    MAX_KEY_FILE_BYTES,
 };
 use crate::pipeline::{decrypt_vault_core, encrypt_vault_core};
 use crate::stream::{sanitize_tar_path, validate_tar_entry_type, CHUNK_SIZE};
@@ -1078,6 +1081,7 @@ fn test_sprint8_scoped_cleaner_purges_only_matching_artifacts() {
     fs::write(&stale_part, vec![0u8; 1024]).unwrap();
     fs::create_dir_all(stale_stage.join("nested")).unwrap();
     fs::write(stale_stage.join("nested/junk.txt"), vec![0u8; 2048]).unwrap();
+    fs::write(stale_stage.join(".active.lock"), b"").unwrap();
 
     let (cleaned, freed) = clean_scoped_staging_dir(&ws).unwrap();
     assert_eq!(cleaned, 2, "Only Ombracrypt staging artifacts must be purged");
@@ -1426,21 +1430,17 @@ fn test_fs_guard_active_locked_staging_file_skipped_by_cleaner() {
     let (ws, _guard) = create_test_workspace("locked_cleaner");
     let active_part = ws.join(".ombracrypt_part_11112222333344445555666677778888.part");
 
-    // Hold exclusive lock through create_public_staging_file
     let mut locked_file = create_public_staging_file(&active_part).unwrap();
     locked_file.write_all(&vec![0xEEu8; 512]).unwrap();
     locked_file.sync_all().unwrap();
 
-    // Verify cleaner does not unlink the file while lock is held
     let (cleaned, freed) = clean_scoped_staging_dir(&ws).unwrap();
     assert_eq!(cleaned, 0, "Active locked staging file must NOT be purged");
     assert_eq!(freed, 0);
     assert!(active_part.exists(), "Active staging file must remain intact");
 
-    // Release writer lock handle
     drop(locked_file);
 
-    // Cleaner should now acquire lock and purge the orphaned file
     let (cleaned_after, freed_after) = clean_scoped_staging_dir(&ws).unwrap();
     assert_eq!(cleaned_after, 1, "Unlocked staging file must now be purged");
     assert_eq!(freed_after, 512);
@@ -1477,7 +1477,6 @@ fn test_fs_guard_atomic_dir_publication_prevents_overwrite_of_existing_dir() {
     fs::create_dir_all(&stage_dir).unwrap();
     fs::write(stage_dir.join("new_file.txt"), b"NEW_DATA").unwrap();
 
-    // Destination directory already exists
     fs::create_dir_all(&final_dir).unwrap();
 
     let res = atomic_publish_dir_noreplace(&stage_dir, &final_dir);
@@ -1534,4 +1533,206 @@ fn test_fs_guard_atomic_dir_publication_rejects_dangling_symlink() {
         err_msg
     );
     assert!(stage_dir.exists());
+}
+
+// =========================================================================
+// CONCURRENT PUBLISHERS, SENTINEL LOCKS & NAMESPACE REGRESSION TESTS
+// =========================================================================
+
+#[test]
+fn test_fs_guard_concurrent_two_publishers_collision_barrier() {
+    let (ws, _guard) = create_test_workspace("concurrent_publishers");
+    let final_target = ws.join("contended_vault.obv");
+
+    let part_a = ws.join(".ombracrypt_part_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.part");
+    let part_b = ws.join(".ombracrypt_part_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.part");
+
+    let payload_a = vec![0x11u8; 4096];
+    let payload_b = vec![0x22u8; 4096];
+
+    fs::write(&part_a, &payload_a).unwrap();
+    fs::write(&part_b, &payload_b).unwrap();
+
+    let barrier = Arc::new(Barrier::new(2));
+
+    let part_a_clone = part_a.clone();
+    let final_target_clone1 = final_target.clone();
+    let barrier_clone1 = barrier.clone();
+
+    let handle_a = thread::spawn(move || {
+        barrier_clone1.wait();
+        atomic_publish_noreplace(&part_a_clone, &final_target_clone1)
+    });
+
+    let part_b_clone = part_b.clone();
+    let final_target_clone2 = final_target.clone();
+    let barrier_clone2 = barrier.clone();
+
+    let handle_b = thread::spawn(move || {
+        barrier_clone2.wait();
+        atomic_publish_noreplace(&part_b_clone, &final_target_clone2)
+    });
+
+    let res_a = handle_a.join().unwrap();
+    let res_b = handle_b.join().unwrap();
+
+    // Exactly one operation must succeed, and exactly one must fail closed with collision refusal
+    let (ok_count, err_count) = match (&res_a, &res_b) {
+        (Ok(()), Err(e)) | (Err(e), Ok(())) => {
+            assert!(
+                e.contains("Refusing to overwrite existing file"),
+                "Losing publisher must fail with collision refusal: {}",
+                e
+            );
+            (1, 1)
+        }
+        _ => (0, 0),
+    };
+    assert_eq!((ok_count, err_count), (1, 1), "Exactly one concurrent publication must succeed");
+
+    // The destination file must be byte-for-byte identical to the winner's payload (never truncated or corrupted)
+    let winner_bytes = fs::read(&final_target).unwrap();
+    assert!(
+        winner_bytes == payload_a || winner_bytes == payload_b,
+        "Published vault must match winner payload completely"
+    );
+
+    // The winning staging file was consumed; the losing staging file remains intact
+    let remaining_parts = (if part_a.exists() { 1 } else { 0 }) + (if part_b.exists() { 1 } else { 0 });
+    assert_eq!(remaining_parts, 1, "Only the loser's staging file remains intact");
+}
+
+#[test]
+fn test_fs_guard_active_locked_extraction_dir_skipped_by_cleaner() {
+    let (ws, _guard) = create_test_workspace("active_extraction_cleaner");
+    let stage_dir = ws.join(".ombracrypt_stage_33333333333333333333333333333333");
+    fs::create_dir_all(&stage_dir).unwrap();
+
+    let sentinel_path = stage_dir.join(".active.lock");
+    let sentinel_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(&sentinel_path)
+        .unwrap();
+
+    // Hold exclusive lock (simulating active extraction writer)
+    sentinel_file.try_lock_exclusive().unwrap();
+    fs::write(stage_dir.join("extracted_chunk.bin"), vec![0x99u8; 1024]).unwrap();
+
+    // Cleaner must skip the active directory completely
+    let (cleaned, freed) = clean_scoped_staging_dir(&ws).unwrap();
+    assert_eq!(cleaned, 0, "Active extraction directory must NOT be purged");
+    assert_eq!(freed, 0);
+
+    assert!(stage_dir.exists(), "Staging directory must remain untouched");
+    assert!(sentinel_path.exists());
+    assert!(stage_dir.join("extracted_chunk.bin").exists());
+
+    // Release lock handle
+    drop(sentinel_file);
+}
+
+#[test]
+fn test_fs_guard_stale_extraction_dir_purged_when_lock_released() {
+    let (ws, _guard) = create_test_workspace("stale_extraction_cleaner");
+    let stage_dir = ws.join(".ombracrypt_stage_44444444444444444444444444444444");
+    fs::create_dir_all(&stage_dir).unwrap();
+
+    let sentinel_path = stage_dir.join(".active.lock");
+    let sentinel_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(&sentinel_path)
+        .unwrap();
+
+    fs::write(stage_dir.join("stale_file.bin"), vec![0x88u8; 2048]).unwrap();
+
+    // Drop lock handle (simulating abandoned or crashed process)
+    drop(sentinel_file);
+
+    // Cleaner should now acquire lock and purge the stale extraction folder
+    let (cleaned, freed) = clean_scoped_staging_dir(&ws).unwrap();
+    assert_eq!(cleaned, 1, "Abandoned extraction directory must be purged");
+    assert_eq!(freed, 2048);
+    assert!(!stage_dir.exists(), "Stale staging directory must be unlinked");
+}
+
+#[test]
+fn test_fs_guard_missing_sentinel_extraction_dir_skipped() {
+    let (ws, _guard) = create_test_workspace("missing_sentinel_cleaner");
+    let stage_dir = ws.join(".ombracrypt_stage_55555555555555555555555555555555");
+    fs::create_dir_all(&stage_dir).unwrap();
+    fs::write(stage_dir.join("unprotected.bin"), vec![0x77u8; 512]).unwrap();
+
+    // Directory without .active.lock sentinel must be skipped (either non-Ombracrypt or in-flight initialization)
+    let (cleaned, freed) = clean_scoped_staging_dir(&ws).unwrap();
+    assert_eq!(cleaned, 0, "Directory without sentinel must be skipped");
+    assert_eq!(freed, 0);
+    assert!(stage_dir.exists());
+}
+
+#[test]
+fn test_fs_guard_cleaner_ignores_malformed_names() {
+    let (ws, _guard) = create_test_workspace("malformed_names_cleaner");
+    let short_file = ws.join(".ombracrypt_part_1234.part");
+    let non_hex_file = ws.join(".ombracrypt_part_nothexcharacters123456789012345.part");
+    let short_dir = ws.join(".ombracrypt_stage_short");
+    let non_hex_dir = ws.join(".ombracrypt_stage_nothexcharacters123456789012345");
+
+    fs::write(&short_file, b"DATA").unwrap();
+    fs::write(&non_hex_file, b"DATA").unwrap();
+    fs::create_dir_all(&short_dir).unwrap();
+    fs::create_dir_all(&non_hex_dir).unwrap();
+
+    let (cleaned, freed) = clean_scoped_staging_dir(&ws).unwrap();
+    assert_eq!(cleaned, 0, "Malformed names must never be touched by cleaner");
+    assert_eq!(freed, 0);
+
+    assert!(short_file.exists());
+    assert!(non_hex_file.exists());
+    assert!(short_dir.exists());
+    assert!(non_hex_dir.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn test_fs_guard_cleaner_preserves_staging_symlinks() {
+    let (ws, _guard) = create_test_workspace("symlink_cleaner");
+    let real_file = ws.join("user_real_file.txt");
+    fs::write(&real_file, b"DO_NOT_DELETE").unwrap();
+
+    let fake_part_symlink = ws.join(".ombracrypt_part_66666666666666666666666666666666.part");
+    std::os::unix::fs::symlink(&real_file, &fake_part_symlink).unwrap();
+
+    let real_dir = ws.join("user_real_dir");
+    fs::create_dir_all(&real_dir).unwrap();
+    let fake_stage_symlink = ws.join(".ombracrypt_stage_77777777777777777777777777777777");
+    std::os::unix::fs::symlink(&real_dir, &fake_stage_symlink).unwrap();
+
+    let (cleaned, freed) = clean_scoped_staging_dir(&ws).unwrap();
+    assert_eq!(cleaned, 0, "Symlinks must be rejected without traversal");
+    assert_eq!(freed, 0);
+
+    assert!(fake_part_symlink.exists());
+    assert!(fake_stage_symlink.exists());
+    assert!(real_file.exists(), "Target file must remain untouched");
+    assert!(real_dir.exists(), "Target directory must remain untouched");
+}
+
+#[test]
+fn test_stream_tar_blocks_reserved_sentinel_path() {
+    assert!(
+        sanitize_tar_path(Path::new(".active.lock")).is_err(),
+        "Archive entry named .active.lock must be rejected"
+    );
+    assert!(
+        sanitize_tar_path(Path::new(".active.lock/nested.txt")).is_err(),
+        "Archive paths under .active.lock must be rejected"
+    );
+    assert!(
+        sanitize_tar_path(Path::new("safe_dir/.active.lock")).is_ok(),
+        "Nested subfolder files named .active.lock are not at the top level and are permitted"
+    );
 }

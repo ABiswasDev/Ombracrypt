@@ -202,6 +202,10 @@ pub fn sanitize_tar_path(entry_path: &Path) -> Result<PathBuf, String> {
             }
         }
     }
+    // Reserve .active.lock sentinel name to prevent malicious archives from interfering with directory locking
+    if clean == Path::new(".active.lock") || clean.starts_with(".active.lock") {
+        return Err("Security Error: Archive contains reserved staging path '.active.lock'.".to_string());
+    }
     Ok(clean)
 }
 

@@ -60,6 +60,23 @@ pub fn sync_parent_directory(dir: &Path) {
     }
 }
 
+/// Validates that a filename strictly matches the Ombracrypt staging file specification:
+/// .ombracrypt_part_<32-hex-characters>.part (exactly 54 bytes)
+pub fn is_valid_staging_file_name(name: &str) -> bool {
+    name.len() == 54
+        && name.starts_with(".ombracrypt_part_")
+        && name.ends_with(".part")
+        && name[17..49].bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Validates that a directory name strictly matches the Ombracrypt extraction staging directory specification:
+/// .ombracrypt_stage_<32-hex-characters> (exactly 50 bytes)
+pub fn is_valid_staging_dir_name(name: &str) -> bool {
+    name.len() == 50
+        && name.starts_with(".ombracrypt_stage_")
+        && name[18..50].bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 /// Generates a hidden, CSPRNG-unique staging path with strict .ombracrypt_part_ namespace
 pub fn unique_staging_path(dir: &Path, _base_filename: &str) -> PathBuf {
     let mut rnd = [0u8; 16];
@@ -103,7 +120,8 @@ pub fn create_public_staging_file(path: &Path) -> Result<File, String> {
 }
 
 /// Creates a CSPRNG-unique extraction staging directory with restrictive 0700 permissions on Unix
-pub fn create_secure_staging_dir(out_dir: &Path, _file_stem: &str) -> Result<PathBuf, String> {
+/// and initializes an exclusively locked .active.lock sentinel inside it.
+pub fn create_secure_staging_dir(out_dir: &Path, _file_stem: &str) -> Result<(PathBuf, File), String> {
     let mut rnd = [0u8; 16];
     OsRng.fill_bytes(&mut rnd);
     let stage_dir = out_dir.join(format!(
@@ -125,7 +143,26 @@ pub fn create_secure_staging_dir(out_dir: &Path, _file_stem: &str) -> Result<Pat
             .map_err(|e| format!("Failed to create secure staging directory: {}", e))?;
     }
 
-    Ok(stage_dir)
+    let sentinel_path = stage_dir.join(".active.lock");
+    let mut opts = OpenOptions::new();
+    opts.read(true).write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let sentinel_file = opts.open(&sentinel_path).map_err(|e| {
+        let _ = fs::remove_dir_all(&stage_dir);
+        format!("Failed to create staging directory sentinel lock: {}", e)
+    })?;
+
+    if let Err(e) = sentinel_file.try_lock_exclusive() {
+        drop(sentinel_file);
+        let _ = fs::remove_dir_all(&stage_dir);
+        return Err(format!("Failed to acquire exclusive lock on staging directory sentinel: {}", e));
+    }
+
+    Ok((stage_dir, sentinel_file))
 }
 
 /// Scans only the designated target folder for stale Ombracrypt staging remnants and purges them safely
@@ -151,21 +188,65 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
             continue;
         }
 
-        if meta.is_dir() && name_str.starts_with(".ombracrypt_stage_") {
-            // Never purge directories currently active in any running pipeline thread
+        if meta.is_dir() && is_valid_staging_dir_name(&name_str) {
+            // Never purge directories currently active in any running pipeline thread in this process
             if is_staging_path_active(&path) {
                 continue;
             }
+
+            let sentinel_path = path.join(".active.lock");
+
+            // Look for .active.lock; reject missing, symlink, or non-regular file
+            let Ok(sentinel_meta) = fs::symlink_metadata(&sentinel_path) else {
+                continue;
+            };
+            if !sentinel_meta.is_file() || sentinel_meta.file_type().is_symlink() {
+                continue;
+            }
+
+            // Attempt to open and exclusively lock the sentinel
+            let Ok(sentinel_file) = OpenOptions::new().read(true).write(true).open(&sentinel_path) else {
+                continue;
+            };
+
+            // If an active extractor is holding the lock, try_lock_exclusive will fail
+            if sentinel_file.try_lock_exclusive().is_err() {
+                continue;
+            }
+
             if let Ok((b, _)) = calculate_dir_metrics(&path) {
                 freed_bytes = freed_bytes.saturating_add(b);
             }
-            if fs::remove_dir_all(&path).is_ok() {
-                count += 1;
+
+            #[cfg(unix)]
+            {
+                if fs::remove_dir_all(&path).is_ok() {
+                    count += 1;
+                }
+                drop(sentinel_file);
             }
-        } else if meta.is_file()
-            && name_str.starts_with(".ombracrypt_part_")
-            && name_str.ends_with(".part")
-        {
+            #[cfg(not(unix))]
+            {
+                // On Windows, delete inner files, delete sentinel, drop lock handle, then delete parent dir
+                if let Ok(sub_entries) = fs::read_dir(&path) {
+                    for sub_entry in sub_entries.flatten() {
+                        let sub_path = sub_entry.path();
+                        if sub_path.file_name().and_then(|s| s.to_str()) != Some(".active.lock") {
+                            if sub_path.is_dir() {
+                                let _ = fs::remove_dir_all(&sub_path);
+                            } else {
+                                let _ = fs::remove_file(&sub_path);
+                            }
+                        }
+                    }
+                }
+                let _ = fs::remove_file(&sentinel_path);
+                drop(sentinel_file);
+                if fs::remove_dir(&path).is_ok() {
+                    count += 1;
+                }
+            }
+        } else if meta.is_file() && is_valid_staging_file_name(&name_str) {
             // Never purge files actively registered in memory by an ongoing write operation
             if is_staging_path_active(&path) {
                 continue;
@@ -259,19 +340,44 @@ impl Drop for TempFileGuard {
     }
 }
 
-/// RAII Guard that automatically tracks and wipes the temporary extraction staging folder on decryption failure
+/// RAII Guard that automatically tracks, locks, and wipes the temporary extraction staging folder on failure
 pub struct TempDirGuard {
     path: PathBuf,
+    sentinel_lock: Option<File>,
     armed: bool,
 }
 
 impl TempDirGuard {
     pub fn new(path: PathBuf) -> Self {
         register_active_staging_path(path.clone());
-        Self { path, armed: true }
+        Self {
+            path,
+            sentinel_lock: None,
+            armed: true,
+        }
     }
+
+    pub fn with_sentinel(path: PathBuf, sentinel_lock: File) -> Self {
+        register_active_staging_path(path.clone());
+        Self {
+            path,
+            sentinel_lock: Some(sentinel_lock),
+            armed: true,
+        }
+    }
+
+    /// Releases and unlinks the sentinel file cleanly before publication so the target output remains clean
+    pub fn release_sentinel(&mut self) {
+        if let Some(lock) = self.sentinel_lock.take() {
+            drop(lock);
+            let sentinel_path = self.path.join(".active.lock");
+            let _ = fs::remove_file(&sentinel_path);
+        }
+    }
+
     pub fn disarm(&mut self) {
         self.armed = false;
+        self.sentinel_lock = None;
         unregister_active_staging_path(&self.path);
     }
 }
@@ -280,6 +386,7 @@ impl Drop for TempDirGuard {
     fn drop(&mut self) {
         unregister_active_staging_path(&self.path);
         if self.armed && self.path.exists() {
+            self.sentinel_lock = None;
             let _ = fs::remove_dir_all(&self.path);
         }
     }
