@@ -10,8 +10,8 @@ use fs2::FileExt;
 
 use crate::fs_guard::{
     atomic_publish_dir_noreplace, atomic_publish_noreplace, clean_scoped_staging_dir,
-    create_public_staging_file, read_bounded_key_file, CommitRollbackGuard, TempDirGuard,
-    MAX_KEY_FILE_BYTES,
+    create_public_staging_file, read_bounded_key_file, verify_locked_sentinel,
+    CommitRollbackGuard, TempDirGuard, MAX_KEY_FILE_BYTES,
 };
 use crate::pipeline::{decrypt_vault_core, encrypt_vault_core};
 use crate::stream::{sanitize_tar_path, validate_tar_entry_type, CHUNK_SIZE};
@@ -78,8 +78,8 @@ fn test_roundtrip_xwing_xchacha20_and_zero_temp_files() {
     let recovered = fs::read(extract_dir.join("sample_payload/nested/secret.txt")).unwrap();
     assert_eq!(recovered, secret_data);
     assert!(
-        !extract_dir.join("sample_payload/.active.lock").exists(),
-        "Internal .active.lock sentinel must never leak into extracted output"
+        fs::symlink_metadata(extract_dir.join("sample_payload/.active.lock")).is_err(),
+        "Internal .active.lock sentinel must never exist in extracted output"
     );
 }
 
@@ -129,8 +129,8 @@ fn test_roundtrip_cypherpunk_aes256gcm() {
     let restored = fs::read(extract_dir.join("alpha/large.bin")).unwrap();
     assert_eq!(restored, payload);
     assert!(
-        !extract_dir.join("alpha/.active.lock").exists(),
-        "Internal .active.lock sentinel must never leak into extracted output"
+        fs::symlink_metadata(extract_dir.join("alpha/.active.lock")).is_err(),
+        "Internal .active.lock sentinel must never exist in extracted output"
     );
 }
 
@@ -1805,4 +1805,53 @@ fn test_stream_tar_blocks_reserved_sentinel_path() {
         sanitize_tar_path(Path::new("safe_dir/.active.lock")).is_ok(),
         "Nested subfolder files named .active.lock are not at the top level and are permitted"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_fs_guard_stale_open_sentinel_fd_race_rejected() {
+    use std::os::unix::fs::MetadataExt;
+
+    let (ws, _guard) = create_test_workspace("stale_fd_race");
+    let stage_dir = ws.join(".ombracrypt_stage_88888888888888888888888888888888");
+    fs::create_dir_all(&stage_dir).unwrap();
+    let sentinel_path = stage_dir.join(".active.lock");
+
+    // 1. Extractor creates and locks sentinel
+    let extractor_sentinel = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(&sentinel_path)
+        .unwrap();
+    extractor_sentinel.try_lock_exclusive().unwrap();
+
+    // 2. Cleaner opens sentinel descriptor before it is unlinked
+    let cleaner_stale_sentinel = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&sentinel_path)
+        .unwrap();
+
+    // 3. Extractor unlinks sentinel and drops lock
+    fs::remove_file(&sentinel_path).unwrap();
+    drop(extractor_sentinel);
+
+    // 4. Stale handle can now lock the unlinked inode
+    assert!(cleaner_stale_sentinel.try_lock_exclusive().is_ok());
+    assert_eq!(cleaner_stale_sentinel.metadata().unwrap().nlink(), 0);
+
+    // 5. Verify post-lock validation directly rejects the stale handle
+    assert!(
+        !verify_locked_sentinel(&cleaner_stale_sentinel, &sentinel_path),
+        "verify_locked_sentinel must reject unlinked file descriptor"
+    );
+
+    // 6. Verify cleaner rejects the directory because post-lock validation detects unlinked sentinel
+    let (cleaned, freed) = clean_scoped_staging_dir(&ws).unwrap();
+    assert_eq!(cleaned, 0, "Directory with unlinked sentinel must not be purged");
+    assert_eq!(freed, 0);
+    assert!(stage_dir.exists(), "Staging directory must remain intact");
+
+    drop(cleaner_stale_sentinel);
 }

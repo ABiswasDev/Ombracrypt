@@ -77,6 +77,54 @@ pub fn is_valid_staging_dir_name(name: &str) -> bool {
         && name[18..50].bytes().all(|b| b.is_ascii_hexdigit())
 }
 
+/// Validates that an open, locked sentinel file descriptor still corresponds to an active,
+/// non-unlinked file at sentinel_path. Detects and prevents the stale-open file descriptor race.
+pub fn verify_locked_sentinel(sentinel_file: &File, sentinel_path: &Path) -> bool {
+    let Ok(locked_meta) = sentinel_file.metadata() else {
+        return false;
+    };
+
+    if !locked_meta.is_file() {
+        return false;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        // If nlink == 0, the file was unlinked before lock acquisition (stale FD race)
+        if locked_meta.nlink() == 0 {
+            return false;
+        }
+
+        // Verify the directory path entry still points to the exact same inode we locked
+        let Ok(recheck_meta) = fs::symlink_metadata(sentinel_path) else {
+            return false;
+        };
+        if recheck_meta.dev() != locked_meta.dev() || recheck_meta.ino() != locked_meta.ino() {
+            return false;
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        let Ok(recheck_meta) = fs::symlink_metadata(sentinel_path) else {
+            return false;
+        };
+        if !recheck_meta.is_file() {
+            return false;
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        if fs::symlink_metadata(sentinel_path).is_err() {
+            return false;
+        }
+    }
+
+    true
+}
+
 /// Generates a hidden, CSPRNG-unique staging path with strict .ombracrypt_part_ namespace
 pub fn unique_staging_path(dir: &Path, _base_filename: &str) -> PathBuf {
     let mut rnd = [0u8; 16];
@@ -204,7 +252,7 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
                 continue;
             }
 
-            // Attempt to open and exclusively lock the sentinel
+            // Attempt to open the sentinel file
             let Ok(sentinel_file) = OpenOptions::new().read(true).write(true).open(&sentinel_path) else {
                 continue;
             };
@@ -214,18 +262,23 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
                 continue;
             }
 
-            if let Ok((b, _)) = calculate_dir_metrics(&path) {
-                freed_bytes = freed_bytes.saturating_add(b);
+            // Post-lock validation: Verify sentinel was not unlinked or substituted before lock acquisition
+            if !verify_locked_sentinel(&sentinel_file, &sentinel_path) {
+                drop(sentinel_file);
+                continue;
             }
+
+            let dir_bytes = calculate_dir_metrics(&path).map(|(b, _)| b).unwrap_or(0);
 
             #[cfg(unix)]
             {
                 if fs::remove_dir_all(&path).is_ok() {
                     count += 1;
+                    freed_bytes = freed_bytes.saturating_add(dir_bytes);
                 }
                 drop(sentinel_file);
             }
-            #[cfg(not(unix))]
+            #[cfg(windows)]
             {
                 // On Windows: Delete inner files, then delete sentinel, drop lock handle, and remove parent dir.
                 // Strict invariant: Never remove .active.lock if any child deletion or enumeration fails.
@@ -265,6 +318,10 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
                         drop(sentinel_file);
                         if fs::remove_dir(&path).is_ok() {
                             count += 1;
+                            freed_bytes = freed_bytes.saturating_add(dir_bytes);
+                        } else {
+                            // Parent dir removal failed: recreate sentinel so subsequent sweeps can retry cleanup
+                            let _ = OpenOptions::new().write(true).create(true).open(&sentinel_path);
                         }
                     } else {
                         drop(sentinel_file);
@@ -272,6 +329,14 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
                 } else {
                     drop(sentinel_file);
                 }
+            }
+            #[cfg(not(any(unix, windows)))]
+            {
+                if fs::remove_dir_all(&path).is_ok() {
+                    count += 1;
+                    freed_bytes = freed_bytes.saturating_add(dir_bytes);
+                }
+                drop(sentinel_file);
             }
         } else if meta.is_file() && is_valid_staging_file_name(&name_str) {
             // Never purge files actively registered in memory by an ongoing write operation
