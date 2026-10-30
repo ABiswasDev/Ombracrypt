@@ -78,7 +78,8 @@ pub fn is_valid_staging_dir_name(name: &str) -> bool {
 }
 
 /// Validates that an open, locked sentinel file descriptor still corresponds to an active,
-/// non-unlinked file at sentinel_path. Detects and prevents the stale-open file descriptor race.
+/// non-unlinked file at sentinel_path. Detects and prevents the stale-open file descriptor race
+/// across Unix (st_dev, st_ino, st_nlink) and Windows (dwVolumeSerialNumber, nFileIndex, nNumberOfLinks).
 pub fn verify_locked_sentinel(sentinel_file: &File, sentinel_path: &Path) -> bool {
     let Ok(locked_meta) = sentinel_file.metadata() else {
         return false;
@@ -107,10 +108,48 @@ pub fn verify_locked_sentinel(sentinel_file: &File, sentinel_path: &Path) -> boo
 
     #[cfg(windows)]
     {
-        let Ok(recheck_meta) = fs::symlink_metadata(sentinel_path) else {
+        use std::mem::MaybeUninit;
+        use std::os::windows::io::AsRawHandle;
+
+        let locked_h = sentinel_file.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
+        let mut locked_info = MaybeUninit::<windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION>::uninit();
+        let success = unsafe {
+            windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandle(
+                locked_h,
+                locked_info.as_mut_ptr(),
+            )
+        };
+        if success == 0 {
+            return false;
+        }
+        let locked_info = unsafe { locked_info.assume_init() };
+
+        // If number of links is 0, the file is in delete-pending state on NTFS
+        if locked_info.nNumberOfLinks == 0 {
+            return false;
+        }
+
+        let Ok(recheck_file) = OpenOptions::new().read(true).open(sentinel_path) else {
             return false;
         };
-        if !recheck_meta.is_file() {
+
+        let recheck_h = recheck_file.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
+        let mut recheck_info = MaybeUninit::<windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION>::uninit();
+        let success = unsafe {
+            windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandle(
+                recheck_h,
+                recheck_info.as_mut_ptr(),
+            )
+        };
+        if success == 0 {
+            return false;
+        }
+        let recheck_info = unsafe { recheck_info.assume_init() };
+
+        if locked_info.dwVolumeSerialNumber != recheck_info.dwVolumeSerialNumber
+            || locked_info.nFileIndexHigh != recheck_info.nFileIndexHigh
+            || locked_info.nFileIndexLow != recheck_info.nFileIndexLow
+        {
             return false;
         }
     }
@@ -320,8 +359,17 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
                             count += 1;
                             freed_bytes = freed_bytes.saturating_add(dir_bytes);
                         } else {
-                            // Parent dir removal failed: recreate sentinel so subsequent sweeps can retry cleanup
-                            let _ = OpenOptions::new().write(true).create(true).open(&sentinel_path);
+                            // Parent dir removal failed: atomically recreate sentinel under exclusive lock
+                            // so subsequent passes can safely retry cleanup
+                            if let Ok(recovered_sentinel) = OpenOptions::new()
+                                .read(true)
+                                .write(true)
+                                .create_new(true)
+                                .open(&sentinel_path)
+                            {
+                                let _ = recovered_sentinel.try_lock_exclusive();
+                                drop(recovered_sentinel);
+                            }
                         }
                     } else {
                         drop(sentinel_file);

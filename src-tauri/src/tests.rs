@@ -1855,3 +1855,50 @@ fn test_fs_guard_stale_open_sentinel_fd_race_rejected() {
 
     drop(cleaner_stale_sentinel);
 }
+
+#[cfg(windows)]
+#[test]
+fn test_fs_guard_windows_sentinel_identity_and_replacement() {
+    let (ws, _guard) = create_test_workspace("win_sentinel_id");
+    let stage_dir = ws.join(".ombracrypt_stage_99999999999999999999999999999999");
+    fs::create_dir_all(&stage_dir).unwrap();
+    let sentinel_path = stage_dir.join(".active.lock");
+    let other_path = stage_dir.join("other_file.bin");
+
+    let sentinel_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(&sentinel_path)
+        .unwrap();
+    sentinel_file.try_lock_exclusive().unwrap();
+
+    let other_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(&other_path)
+        .unwrap();
+
+    // 1. Valid matching handle and path must verify successfully
+    assert!(
+        verify_locked_sentinel(&sentinel_file, &sentinel_path),
+        "Active locked sentinel must match its valid path on Windows"
+    );
+
+    // 2. Mismatched file index must be rejected
+    assert!(
+        !verify_locked_sentinel(&sentinel_file, &other_path),
+        "verify_locked_sentinel must reject mismatched file index on Windows"
+    );
+
+    // 3. Nonexistent path must be rejected
+    let missing_path = stage_dir.join(".nonexistent.lock");
+    assert!(
+        !verify_locked_sentinel(&sentinel_file, &missing_path),
+        "verify_locked_sentinel must reject non-existent path on Windows"
+    );
+
+    drop(sentinel_file);
+    drop(other_file);
+}
