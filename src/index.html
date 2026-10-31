@@ -5,21 +5,31 @@
   <meta charset="UTF-8" />
   <link rel="stylesheet" href="styles.css" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Ombracrypt</title>
+  <title>Ombracrypt 2.0.0</title>
   <script type="module" src="/main.js" defer></script>
 </head>
 
 <body>
   <main class="container">
-    <div class="header">
-      <h1 class="glow-title">Ombracrypt</h1>
-      <p>The Zero-trust Quantum-safe vault</p>
-    </div>
+    <!-- Ombracrux-Style Tracked Header -->
+    <header class="header">
+      <h1 class="glow-title">O M B R A C R Y P T</h1>
+      <p class="subtitle">ZERO-TRUST QUANTUM-SAFE VAULT <span class="version-dot">&bull;</span> <span class="version-tag">v2.0.0</span></p>
+      
+      <!-- Signature Diamond Hairline Divider -->
+      <div class="header-divider">
+        <span class="divider-line"></span>
+        <span class="divider-diamond">&#9671;</span>
+        <span class="divider-line"></span>
+      </div>
+    </header>
 
-    <!-- Mode Switcher Tabs -->
-    <div class="mode-tabs">
-      <button type="button" id="mode-encrypt-tab" class="tab-btn active-tab">Encrypt Mode</button>
-      <button type="button" id="mode-decrypt-tab" class="tab-btn">Decrypt Mode</button>
+    <!-- Centered Segmented Capsule Switcher -->
+    <div class="mode-tabs-wrapper">
+      <div class="mode-tabs">
+        <button type="button" id="mode-encrypt-tab" class="tab-btn active-tab">Encrypt Mode</button>
+        <button type="button" id="mode-decrypt-tab" class="tab-btn">Decrypt Mode</button>
+      </div>
     </div>
 
     <!-- Path & Storage Configuration Panel -->
@@ -36,7 +46,7 @@
 
       <div class="path-block divider-top">
         <div id="key-mode-wrapper" class="input-group" style="margin-bottom: 8px; text-align: left;">
-          <label for="key-mode-select" class="neon-green-text">Key Handling Mode</label>
+          <label for="key-mode-select" class="neon-green-text">KEY HANDLING MODE</label>
           <select id="key-mode-select">
             <option value="generate">Generate Keys & Encrypt Vault (.obk + .obp)</option>
             <option value="existing_obp">Seal with Existing Public Key (.obp)</option>
@@ -58,7 +68,7 @@
     <!-- Encryption Algorithm Options (Side-by-Side Grid) -->
     <div class="settings-group" id="settings-group">
       <div class="input-group">
-        <label for="cipher-algo" class="neon-green-text">Cipher Algorithm</label>
+        <label for="cipher-algo" class="neon-green-text">CIPHER ALGORITHM</label>
         <select id="cipher-algo">
           <option value="xchacha20">XChaCha20-Poly1305</option>
           <option value="aes256gcm">AES-256-GCM</option>
@@ -66,7 +76,7 @@
       </div>
 
       <div class="input-group" id="kem-algo-group">
-        <label for="kem-algo" class="neon-green-text">KEM Algorithm</label>
+        <label for="kem-algo" class="neon-green-text">KEM ALGORITHM</label>
         <select id="kem-algo">
           <option value="xwing">X-Wing (ML-KEM-768)</option>
           <option value="cypherpunk">Cypherpunk (ML-KEM-1024)</option>

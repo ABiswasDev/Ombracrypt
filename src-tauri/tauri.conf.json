@@ -10,11 +10,11 @@
     "windows": [
       {
         "title": "Ombracrypt",
-        "width": 540,
-        "height": 760,
-        "minWidth": 500,
-        "minHeight": 700,
-        "resizable": true,
+        "width": 650,
+        "height": 900,
+        "minWidth": 600,
+        "minHeight": 800,
+        "resizable": false,
         "maximizable": false,
         "fullscreen": false
       }

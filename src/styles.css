@@ -1,43 +1,32 @@
 :root {
-  --bg-color: #060c16;
-  --panel-bg: #0a1322;
-  --text-primary: #f0f6fc;
-  --text-secondary: #8ca2bf;
+  --bg-color: #050b14;
+  --panel-bg: #091322;
+  --text-primary: #f1f5f9;
+  --text-secondary: #8fa6c4;
   --accent: #38bdf8;
   --accent-hover: #0284c7;
   --accent-glow: rgba(56, 189, 248, 0.45);
   --silver-bright: #e2e8f0;
   --silver-dim: #94a3b8;
-  --border: #15263d;
+  --border: #13243a;
   --border-focus: #38bdf8;
-  --dementor-smoke: #475569;
+  --font-serif: 'Times New Roman', Times, 'Cinzel', Georgia, serif;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Ubuntu Mono', monospace;
 }
 
 html, body {
   margin: 0;
   padding: 0;
+  width: 100%;
   height: 100%;
   overflow-x: hidden;
-  overflow-y: auto;
+  overflow-y: auto; /* Safety net: invisible normally, scrolls only if scaled or on small screens */
   background-color: var(--bg-color);
   color: var(--text-primary);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-  background-image: radial-gradient(circle at 50% 10%, rgba(56, 189, 248, 0.08) 0%, transparent 60%);
-}
-
-/* Custom Patronus Scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-}
-::-webkit-scrollbar-track {
-  background: #060c16;
-}
-::-webkit-scrollbar-thumb {
-  background: #1c324f;
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #38bdf8;
+  font-family: var(--font-sans);
+  background-image: radial-gradient(circle at 50% 8%, rgba(56, 189, 248, 0.12) 0%, transparent 65%);
+  user-select: none;
 }
 
 body {
@@ -48,59 +37,109 @@ body {
 
 .container {
   width: 100%;
-  max-width: 560px;
-  padding: 14px 18px 16px 18px;
+  max-width: 530px;
+  padding: 24px 20px 16px 20px;
   box-sizing: border-box;
 }
 
+/* Ombracrux-Style Header */
 .header {
   text-align: center;
   margin-bottom: 12px;
 }
 
-.header h1 {
-  margin: 0 0 2px 0;
-  font-size: 1.55rem;
-}
-
-.header p {
+.glow-title {
   margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.82rem;
-  letter-spacing: 0.5px;
+  font-family: var(--font-serif);
+  font-size: 1.75rem;
+  font-weight: 500;
+  letter-spacing: 7px;
+  color: #f8fafc;
+  text-shadow: 0 0 12px rgba(248, 250, 252, 0.3), 0 0 24px rgba(56, 189, 248, 0.25);
 }
 
-/* Mode Switcher Tabs */
-.mode-tabs {
+.subtitle {
+  margin: 8px 0 0 0;
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 2.5px;
+  color: #38bdf8;
+  text-transform: uppercase;
+}
+
+.version-dot {
+  color: #64748b;
+  margin: 0 4px;
+}
+
+.version-tag {
+  color: #94a3b8;
+  font-family: var(--font-mono);
+  letter-spacing: 1px;
+}
+
+/* Diamond Hairline Divider */
+.header-divider {
   display: flex;
-  gap: 8px;
-  margin-bottom: 10px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 10px auto 12px auto;
+  width: 220px;
+}
+
+.divider-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.45), transparent);
+}
+
+.divider-diamond {
+  font-size: 0.72rem;
+  color: #38bdf8;
+  opacity: 0.85;
+  text-shadow: 0 0 8px rgba(56, 189, 248, 0.7);
+}
+
+/* Centered Segmented Capsule Switcher */
+.mode-tabs-wrapper {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.mode-tabs {
+  display: inline-flex;
+  background-color: #07101c;
+  border: 1px solid #14273e;
+  border-radius: 8px;
+  padding: 3px;
+  gap: 4px;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.6);
 }
 
 .tab-btn {
-  flex: 1;
-  padding: 8px;
-  background-color: #0a121e;
+  padding: 6px 22px;
+  background-color: transparent;
   color: var(--text-secondary);
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
   cursor: pointer;
   font-weight: 600;
-  font-size: 0.85rem;
-  transition: all 0.25s ease;
+  font-size: 0.84rem;
+  font-family: var(--font-sans);
+  transition: all 0.2s ease;
 }
 
 .tab-btn:hover {
-  background-color: #0e1a2b;
   color: var(--silver-bright);
-  border-color: #203a5c;
 }
 
 .tab-btn.active-tab {
-  background-color: #0f2238;
-  color: #e0f2fe;
-  border-color: var(--accent);
-  box-shadow: 0 0 12px var(--accent-glow);
+  background-color: #0d1e32;
+  color: #38bdf8;
+  border-color: #38bdf8;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
 }
 
 /* File & Folder Selection */
@@ -111,45 +150,53 @@ body {
   padding: 10px 14px;
   text-align: center;
   margin-bottom: 10px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
 }
 
 .divider-top {
   margin-top: 8px;
-  border-top: 1px dashed #1c324f;
+  border-top: 1px dashed #182e49;
   padding-top: 8px;
 }
 
 .secondary-btn {
   width: 100%;
-  background-color: #0e1b2b;
+  background-color: #0c1828;
   color: var(--silver-bright);
-  border: 1px solid #1f3757;
+  border: 1px solid #1a324f;
   padding: 7px 12px;
-  border-radius: 4px;
+  border-radius: 5px;
   cursor: pointer;
   font-size: 0.84rem;
+  font-family: var(--font-sans);
+  font-weight: 500;
   transition: all 0.2s ease;
 }
 
 .secondary-btn:hover {
-  background-color: #14263d;
+  background-color: #12243a;
   border-color: var(--accent);
   box-shadow: 0 0 8px rgba(56, 189, 248, 0.25);
 }
 
 .key-btn-accent {
-  background-color: #102137;
-  border-color: #2b4c73;
+  background-color: #0f1f33;
+  border-color: #244366;
 }
 
 .path-label {
-  margin: 4px 0 0 0;
+  margin: 5px 0 0 0;
   color: var(--text-secondary);
-  font-size: 0.74rem;
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  background: rgba(5, 11, 20, 0.6);
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(19, 36, 58, 0.6);
+  user-select: text;
 }
 
 /* Storage Telemetry Box */
@@ -157,13 +204,15 @@ body {
   margin-top: 8px;
   padding: 7px 10px;
   border-radius: 4px;
-  font-size: 0.76rem;
-  font-weight: 600;
-  border: 1px solid #1c3350;
-  background-color: #080f1a;
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  border: 1px solid #182f4b;
+  background-color: #070d17;
   word-break: break-word;
   overflow-wrap: anywhere;
   line-height: 1.35;
+  user-select: text;
 }
 
 .telemetry-ok {
@@ -200,7 +249,8 @@ body {
 }
 
 label {
-  font-size: 0.78rem;
+  font-size: 0.74rem;
+  letter-spacing: 1px;
   color: var(--text-secondary);
 }
 
@@ -209,11 +259,17 @@ input, select {
   padding: 8px 10px;
   background-color: var(--panel-bg);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 5px;
   color: var(--text-primary);
   font-size: 0.85rem;
+  font-family: var(--font-sans);
   box-sizing: border-box;
   transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+input[type="password"] {
+  font-family: var(--font-mono);
+  letter-spacing: 2px;
 }
 
 select {
@@ -276,7 +332,7 @@ small {
   background: linear-gradient(135deg, #0284c7 0%, #38bdf8 100%);
   color: #04101e;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 0.95rem;
   font-weight: 700;
   letter-spacing: 0.5px;
@@ -305,7 +361,7 @@ small {
   background-color: #170d13;
   color: #f87171;
   border: 1px solid #ef4444;
-  border-radius: 4px;
+  border-radius: 5px;
   font-size: 0.84rem;
   font-weight: 600;
   cursor: pointer;
@@ -327,12 +383,12 @@ small {
 
 .cancel-clean-btn.idle-clean {
   color: var(--text-secondary);
-  border-color: #1d334d;
-  background-color: #09121d;
+  border-color: #162a3f;
+  background-color: #07101b;
 }
 
 .cancel-clean-btn.idle-clean:hover {
-  background-color: #112136;
+  background-color: #0e1e30;
   color: var(--silver-bright);
   border-color: var(--accent);
   box-shadow: 0 0 8px rgba(56, 189, 248, 0.2);
@@ -346,7 +402,8 @@ small {
 #status-msg {
   text-align: center;
   font-size: 0.82rem;
-  margin: 10px 0 4px 0;
+  font-family: var(--font-sans);
+  margin: 8px 0 2px 0;
   min-height: 20px;
   word-break: break-word;
   overflow-wrap: anywhere;
@@ -356,21 +413,14 @@ small {
 
 .footer-copy {
   font-size: 0.68rem;
-  color: #3b506b;
+  color: #2e435b;
   text-align: center;
   margin-top: 14px;
   user-select: none;
 }
 
-/* Spectral Patronus Luminescence Overrides */
 .neon-green-text {
   color: #7dd3fc !important;
-  text-shadow: 0 0 6px rgba(125, 211, 252, 0.65), 0 0 12px rgba(56, 189, 248, 0.35);
-  font-weight: 500;
-}
-
-.glow-title {
-  color: #e0f2fe !important;
-  text-shadow: 0 0 10px rgba(56, 189, 248, 0.85), 0 0 22px rgba(56, 189, 248, 0.45);
-  letter-spacing: 1.5px;
+  text-shadow: 0 0 6px rgba(125, 211, 252, 0.45);
+  font-weight: 600;
 }
