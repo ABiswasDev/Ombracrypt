@@ -61,7 +61,7 @@ Ombracrypt maintains no administrative backdoor, recovery phrase, or password re
 
 ## Downloads & Artifact Overview
 
-Pre-compiled binary packages for desktop platforms are published on [GitHub Releases](https://github.com/ABiswasDev/Ombracrypt/releases):
+Downloadable desktop packages are available on [GitHub Releases](https://github.com/ABiswasDev/Ombracrypt/releases):
 
 | Operating System | Package Formats | Architecture & Distribution |
 | :--- | :--- | :--- |
@@ -89,7 +89,7 @@ The `.obv` header is not encrypted. It exposes the following operational paramet
 
 | Header Field | Size | Description |
 | :--- | :--- | :--- |
-| **Format Magic & Version** | 5 bytes | File format identifier (`OBV02`) |
+| **Format Magic & Version** | 5 bytes | File format identifier (`OMBV\x02`) |
 | **Cipher Identifier** | 1 byte | Symmetric algorithm (`1` = XChaCha20-Poly1305, `2` = AES-256-GCM) |
 | **KEM Profile Identifier** | 1 byte | Key encapsulation profile (`1` = X-Wing, `2` = Cypherpunk) |
 | **Argon2id Parameters** | 12 bytes | Little-endian `u32` triple: memory cost, pass count, parallelism lanes |
@@ -108,7 +108,7 @@ The vault's overall file size and chunk framing reveal the approximate total siz
 
 ## Cryptographic Specification & Architecture
 
-Ombracrypt uses a layered cryptographic construction combining memory-hard password derivation, post-quantum hybrid key encapsulation, and chunked authenticated symmetric streaming.
+Ombracrypt uses a layered cryptographic construction combining memory-hard password derivation, post-quantum hybrid key encapsulation, and Bounded-memory symmetric streaming.
 
 ```text
 Master Password + 16-byte Salt              Recipient Public Key (.obp)
@@ -149,7 +149,10 @@ Profile 1 implements the X-Wing construction defined in IETF Internet-Draft `dra
 * **Key Derivation:** A 32-byte seed expands via SHAKE256 into 96 bytes. The first 64 bytes seed deterministic key generation for ML-KEM-768 ($d \parallel z$), while the final 32 bytes form the scalar for X25519.
 * **On-the-Fly Expansion:** Private keys (`.obk`) store the 32-byte seed directly. Key expansion occurs in volatile memory upon unlock; expanded key material is zeroized immediately after decapsulation.
 * **Combiner:** Shared secret synthesis strictly follows the draft concatenation formula using the canonical 6-byte domain separator `5c 2e 2f 2f 5e 5c` (ASCII `\.//^\`):
-  $$\text{ss} = \text{SHA3-256}\left(\text{ss}_{\text{ML-KEM}} \parallel \text{ss}_{\text{X25519}} \parallel \text{ct}_{\text{X25519}} \parallel \text{pk}_{\text{X25519}} \parallel \texttt{5c2e2f2f5e5c}_{16}\right)$$
+
+$$
+\text{ss} = \text{SHA3-256}\left(\text{ss}_{\text{ML-KEM}} \parallel \text{ss}_{\text{X25519}} \parallel \text{ct}_{\text{X25519}} \parallel \text{pk}_{\text{X25519}} \parallel \mathtt{5c2e2f2f5e5c}_{16}\right)
+$$
 
 #### Profile 2: Cypherpunk (ML-KEM-1024 + X25519)
 A custom hybrid profile engineered for environments seeking Category 5 post-quantum security parameters:
@@ -169,9 +172,14 @@ ML-KEM encapsulation and decapsulation operations are executed by the `fips203` 
   * Parallelism ($p$): $4\text{ lanes}$
   * Salt: 16 cryptographically secure random bytes generated per vault operation.
 * **RFC 5869 HKDF-SHA256 Master Key Expansion:** The 32-byte Argon2id output and the 32-byte KEM hybrid shared secret concatenate into a 64-byte input keying material ($\text{IKM}$). HKDF-SHA256 expands this input using the vault header's 16-byte salt and domain context `OMBRACRYPT-V2-MASTER-KEY` into a uniform 256-bit symmetric Master Key:
-  $$\text{PRK} = \text{HKDF-Extract}(\text{Salt}, \text{ArgonKey} \parallel \text{HybridSS})$$
-  $$\text{MasterKey} = \text{HKDF-Expand}(\text{PRK}, \texttt{"OMBRACRYPT-V2-MASTER-KEY"}, 32)$$
 
+$$
+\text{PRK} = \text{HKDF-Extract}(\text{Salt}, \text{ArgonKey} \parallel \text{HybridSS})
+$$
+
+$$
+\text{MasterKey} = \text{HKDF-Expand}(\text{PRK}, \mathtt{"OMBRACRYPT-V2-MASTER-KEY"}, 32)
+$$
 ---
 
 ### 3. Streaming AEAD Engine
@@ -182,10 +190,18 @@ ML-KEM encapsulation and decapsulation operations are executed by the `fips203` 
   * **AES-256-GCM:** 256-bit key with a 96-bit (12-byte) random base nonce.
 * **Chunk Framing:** Data is encrypted in discrete chunks of up to 1&nbsp;MiB. The final chunk in a stream may be smaller.
 * **Per-Chunk Nonce Derivation:** To prevent nonce reuse across multi-gigabyte streams, each chunk uses a unique nonce derived by XORing a 64-bit little-endian chunk counter ($i$) into the final 8 bytes of the base nonce:
-  $$\text{Nonce}_i = \text{BaseNonce}[..L-8] \parallel \left(\text{BaseNonce}[L-8..L] \oplus \text{to\_le\_bytes}(i)\right)$$
+
+$$
+\text{Nonce}_i = \text{BaseNonce}[..L-8] \parallel \left(\text{BaseNonce}[L-8..L] \oplus \operatorname{to\_le\_bytes}(i)\right)
+$$
+
 * **Header-Bound Associated Data (AAD):** The serialized cleartext header is hashed using SHA-256 to produce a 32-byte digest. For each chunk ($i$), this digest is combined with an 8-byte chunk index and a 1-byte finalization flag to construct a 41-byte AAD payload:
-  $$\text{AAD}_i = \text{SHA-256}(\text{VaultHeader})_{32} \parallel \text{to\_le\_bytes}(i)_{8} \parallel \text{IsFinal}_{1}$$
-  This cryptographically binds the cleartext header and chunk sequence to every ciphertext block. Any modification to the cleartext header causes authentication failure when the affected chunk is validated during extraction.
+
+$$
+\text{AAD}_i = \text{SHA-256}(\text{VaultHeader})_{32} \parallel \operatorname{to\_le\_bytes}(i)_{8} \parallel \text{IsFinal}_{1}
+$$
+
+This cryptographically binds the cleartext header and chunk sequence to every ciphertext block. Any modification to the cleartext header causes authentication failure when the affected chunk is validated during extraction.
 
 ---
 
@@ -220,7 +236,7 @@ Writing and extracting archives on shared or untrusted storage introduces race c
 ### Atomic No-Clobber Publication
 Ombracrypt implements two distinct publication pathways depending on whether the artifact is a file or a directory:
 
-1. **File Publication (`CommitRollbackGuard::commit_file`):** Staged files (`.obv`, `.obk`, `.obp`) promote to final destinations via atomic hard links on supported filesystems (ext4, NTFS, APFS, XFS, Btrfs, ZFS), followed by unlinking the staged `.part` entry. If hard-linking fails for reasons other than an existing target (such as across filesystem boundaries or on filesystems like FAT32 and exFAT), it falls back to native atomic no-replace operations.
+1. **File Publication (`CommitRollbackGuard::commit_file`):** Staged files (`.obv`, `.obk`, `.obp`) promote to final destinations via atomic hard links on supported filesystems (ext4, NTFS, APFS, XFS, Btrfs, ZFS), followed by unlinking the staged `.part` entry. If hard-linking fails for reasons other than an existing target (such as on filesystems without hard-link support like FAT32 and exFAT), it falls back to native atomic no-replace operations.
 2. **Directory Publication (`atomic_publish_dir_noreplace`):** Successfully decrypted directories promote from staging to destination directly via platform-native atomic no-replace syscalls:
    * **Linux:** `libc::renameat2` with `RENAME_NOREPLACE`
    * **macOS:** `libc::renamex_np` with `RENAME_EXCL`
@@ -246,7 +262,7 @@ Untrusted TAR archives inside `.obv` containers pass through defensive boundary 
 * **Post-Quantum Data Confidentiality:** Protecting static archives on cloud storage or untrusted media against future cryptanalysis by quantum computers.
 * **Cryptographic Agility:** Supporting both XChaCha20-Poly1305 and AES-256-GCM symmetric streaming alongside standard (X-Wing) and high-security (Cypherpunk) KEM profiles.
 * **Artifact Decoupling:** Enabling workflows where vault data (`.obv`) and private keys (`.obk`) reside on isolated media.
-* **Archive Safety:** Defending host filesystems against Zip-Slip traversal, symlink hijacking, and archive bomb denial-of-service during extraction.
+* **Archive Safety:** Defending host filesystems against TAR path-traversal attacks, symlink hijacking, and archive bomb denial-of-service during extraction.
 * **Interactive Coercion Response:** Providing a mechanism to destroy private key material in place when forced to enter credentials.
 
 ### Out of Scope & Operational Realities
