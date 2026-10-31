@@ -309,7 +309,7 @@ At the latest audited commit, the test suite reported 53 passing tests on Ubuntu
 
 ```bash
 # 1. Clone the repository
-git clone [https://github.com/ABiswasDev/Ombracrypt.git](https://github.com/ABiswasDev/Ombracrypt.git)
+git clone https://github.com/ABiswasDev/Ombracrypt.git
 cd Ombracrypt
 
 # 2. Install reproducible frontend dependencies

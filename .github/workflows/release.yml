@@ -24,15 +24,14 @@ jobs:
         id: release_gate
         shell: bash
         run: |
-          # Strict semantic versioning tag match: vX.Y.Z (excludes pre-release hyphens like -beta)
+          # Strict semantic versioning match: vX.Y.Z -> Stable
           if [[ "${{ github.ref }}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "is_stable=true" >> "$GITHUB_OUTPUT"
-            echo "tag_name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
             echo "Release Mode: STABLE RELEASE (${{ github.ref_name }})"
           else
-            echo "is_stable=false" >> "$GITHUB_OUTPUT"
-            echo "tag_name=" >> "$GITHUB_OUTPUT"
-            echo "Release Mode: CANDIDATE ARTIFACT ONLY (${{ github.ref_name }})"
+            # Any tag containing a suffix (-beta, -rc.1) -> Pre-release
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "Release Mode: PRE-RELEASE (${{ github.ref_name }})"
           fi
 
       - name: Install Linux Dependencies
@@ -52,19 +51,18 @@ jobs:
       - name: Install Frontend Dependencies
         run: npm ci
 
-      - name: Build Tauri App (Candidate / Release)
+      - name: Build Tauri App (Auto Draft & Attach)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          # When tagName is empty, tauri-action compiles all desktop bundles without publishing a release
-          tagName: ${{ steps.release_gate.outputs.tag_name }}
-          releaseName: ${{ steps.release_gate.outputs.is_stable == 'true' && format('Ombracrypt {0}', steps.release_gate.outputs.tag_name) || '' }}
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ format('Ombracrypt {0}', github.ref_name) }}
           releaseBody: 'Automated release build for Windows, macOS, and Linux.'
           releaseDraft: true
-          prerelease: false
+          prerelease: ${{ steps.release_gate.outputs.is_prerelease == 'true' }}
 
-      - name: Upload Candidate Build Artifacts
+      - name: Upload Candidate Build Artifacts (Fallback)
         uses: actions/upload-artifact@v4
         with:
           name: ombracrypt-${{ matrix.platform }}-bundles
