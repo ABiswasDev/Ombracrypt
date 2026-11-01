@@ -193,13 +193,13 @@ $$
 * **Per-Chunk Nonce Derivation:** To prevent nonce reuse across multi-gigabyte streams, each chunk uses a unique nonce derived by XORing a 64-bit little-endian chunk counter ($i$) into the final 8 bytes of the base nonce:
 
 $$
-\text{Nonce}_i = \text{BaseNonce}[..L-8] \parallel \left(\text{BaseNonce}[L-8..L] \oplus \operatorname{to\_le\_bytes}(i)\right)
+\text{Nonce}_i = \text{BaseNonce}[..L-8] \parallel \left(\text{BaseNonce}[L-8..L] \oplus \text{to\_le\_bytes}(i)\right)
 $$
 
 * **Header-Bound Associated Data (AAD):** The serialized cleartext header is hashed using SHA-256 to produce a 32-byte digest. For each chunk ($i$), this digest is combined with an 8-byte chunk index and a 1-byte finalization flag to construct a 41-byte AAD payload:
 
 $$
-\text{AAD}_i = \text{SHA-256}(\text{VaultHeader})_{32} \parallel \operatorname{to\_le\_bytes}(i)_{8} \parallel \text{IsFinal}_{1}
+\text{AAD}_i = \text{SHA-256}(\text{VaultHeader})_{32} \parallel \text{to\_le\_bytes}(i)_{8} \parallel \text{IsFinal}_{1}
 $$
 
 This cryptographically binds the cleartext header and chunk sequence to every ciphertext block. Any modification to the cleartext header causes authentication failure when the affected chunk is validated during extraction.
