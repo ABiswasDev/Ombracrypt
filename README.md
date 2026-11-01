@@ -178,8 +178,9 @@ $$
 $$
 
 $$
-\text{MasterKey} = \text{HKDF-Expand}(\text{PRK}, \mathtt{"OMBRACRYPT-V2-MASTER-KEY"}, 32)
+\text{MasterKey} = \text{HKDF-Expand}(\text{PRK}, \text{"OMBRACRYPT-V2-MASTER-KEY"}, 32)
 $$
+
 ---
 
 ### 3. Streaming AEAD Engine
