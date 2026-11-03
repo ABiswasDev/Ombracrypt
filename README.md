@@ -272,6 +272,7 @@ Untrusted TAR archives inside `.obv` containers pass through defensive boundary 
 * **Offline Phantom Block Analysis:** The Duress Trapdoor is an interactive countermeasure. An adversary who clones the `.obk` file prior to the interaction can bypass the in-place overwrite.
 * **Flash Storage Wear-Leveling Residue:** Overwriting an `.obk` file flushes CSPRNG noise to the filesystem, but SSD controllers using dynamic wear-leveling may retain latent physical flash blocks until trimmed or garbage-collected.
 * **Decryption Staging Residue:** Encryption streams directly from memory without writing temporary TAR archives to disk. Decryption extracts validated plaintext files into a restricted local staging folder before atomic publication. A crash or power loss during extraction can leave partial plaintext files in that staging folder until cleared by the user.
+* **Linux Extraction Filesystem Compatibility:** Final extraction requires atomic no-replace directory publication. Some Linux mounts, notably eCryptfs and NTFS-3G/FUSE, may reject `RENAME_NOREPLACE` (`EINVAL`). Use a compatible destination filesystem such as ext4 or the tested native exFAT driver.
 
 ---
 
