@@ -18,9 +18,7 @@
 
 ## Executive Summary
 
-Ombracrypt is an offline-capable, network-independent desktop cryptographic vault designed to secure high-value files and directories against contemporary interception and future quantum cryptanalysis. Built on a memory-safe Rust core and the lightweight Tauri desktop framework, Ombracrypt safeguards data at rest against "Store Now, Decrypt Later" (SNDL) attacks by combining lattice-based post-quantum cryptography with classical elliptic-curve key exchange.
-
-Ombracrypt performs cryptographic derivation, encryption, decryption, and extraction locally without requiring internet connectivity, remote cryptographic services, or telemetry infrastructure. During encryption, directory trees stream through bounded in-process buffers and an authenticated cipher pipeline without creating an intermediate unencrypted TAR file on disk. Designated plaintext buffers are explicitly zeroized in memory after processing. Encrypted payloads (`.obv`) and cryptographic keys (`.obk` / `.obp`) are separated by design, enabling users to store encrypted archives on untrusted public clouds or external media while retaining private decapsulation keys on offline hardware.
+Ombracrypt is a local-first, zero-escrow post-quantum cryptographic vault engineered to protect files against contemporary interception and "Harvest Now, Decrypt Later" (HNDL) attacks. Operating offline with zero telemetry or key custody, it combines hybrid ML-KEM with X25519 and bounded in-memory AEAD streaming, avoiding plaintext staging. Decoupled vault payloads (.obv), offline private keys (.obk), and public sealing keys (.obp) support user-controlled data sovereignty for cold storage and recipient-based sharing.
 
 <p align="center">
   <img src="images/Tool_shot.png" alt="Ombracrypt Interface" width="450">
