@@ -54,6 +54,8 @@ async fn cancel_current_operation(state: State<'_, AppState>) -> Result<String, 
 async fn clean_staging_artifacts(paths: Vec<String>) -> Result<String, String> {
     let mut total_count = 0usize;
     let mut total_bytes = 0u64;
+    let mut total_failed = 0usize;
+    let mut failure_details: Vec<(std::path::PathBuf, String)> = Vec::new();
 
     for p in paths {
         let dir = Path::new(&p);
@@ -63,14 +65,43 @@ async fn clean_staging_artifacts(paths: Vec<String>) -> Result<String, String> {
             } else {
                 dir
             };
-            if let Ok((cnt, b)) = fs_guard::clean_scoped_staging_dir(target_dir) {
-                total_count += cnt;
-                total_bytes = total_bytes.saturating_add(b);
+            match fs_guard::clean_scoped_staging_dir_report(target_dir) {
+                Ok(report) => {
+                    total_count += report.removed_count;
+                    total_bytes = total_bytes.saturating_add(report.freed_bytes);
+                    total_failed += report.failed_count;
+                    failure_details.extend(report.failed_artifacts);
+                }
+                Err(e) => {
+                    return Err(format!("Failed to scan directory {}: {}", target_dir.display(), e));
+                }
             }
         }
     }
 
-    if total_count == 0 {
+    if total_failed > 0 {
+        let sample_failures: Vec<String> = failure_details
+            .iter()
+            .take(3)
+            .map(|(path, err)| format!("{}: {}", path.display(), err))
+            .collect();
+        let detail_str = sample_failures.join("; ");
+        if total_count > 0 {
+            Ok(format!(
+                "Warning: Partially cleaned {} staging artifact(s) ({:.2} MB reclaimed), but {} artifact(s) could not be removed: {}",
+                total_count,
+                total_bytes as f64 / 1_048_576.0,
+                total_failed,
+                detail_str
+            ))
+        } else {
+            Err(format!(
+                "Cleanup Incomplete: {} staging artifact(s) could not be removed due to permissions or locks: {}",
+                total_failed,
+                detail_str
+            ))
+        }
+    } else if total_count == 0 {
         Ok("Selected folders are clean (0 staging remnants found).".to_string())
     } else {
         Ok(format!(

@@ -53,6 +53,15 @@ pub struct SpaceAssessment {
     pub summary: String,
 }
 
+/// Structured report returned by staging cleanup operations
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
+pub struct CleanupReport {
+    pub removed_count: usize,
+    pub freed_bytes: u64,
+    pub failed_count: usize,
+    pub failed_artifacts: Vec<(PathBuf, String)>,
+}
+
 /// Flushes directory metadata to disk/USB so newly committed files/folders appear immediately
 pub fn sync_parent_directory(dir: &Path) {
     if let Ok(dir_handle) = File::open(dir) {
@@ -206,12 +215,16 @@ pub fn create_public_staging_file(path: &Path) -> Result<File, String> {
     Ok(file)
 }
 
-/// Creates a CSPRNG-unique extraction staging directory with restrictive 0700 permissions on Unix
-/// and initializes an exclusively locked .active.lock sentinel inside it.
-pub fn create_secure_staging_dir(out_dir: &Path, _file_stem: &str) -> Result<(PathBuf, File), String> {
+/// Creates a CSPRNG-unique extraction staging wrapper directory with restrictive 0700 permissions on Unix,
+/// initializes an exclusively locked .active.lock sentinel inside it, and creates an inner payload/ directory.
+/// Returns (wrapper_dir, payload_dir, sentinel_file).
+pub fn create_secure_staging_dir(
+    out_dir: &Path,
+    _file_stem: &str,
+) -> Result<(PathBuf, PathBuf, File), String> {
     let mut rnd = [0u8; 16];
     OsRng.fill_bytes(&mut rnd);
-    let stage_dir = out_dir.join(format!(
+    let wrapper_dir = out_dir.join(format!(
         ".ombracrypt_stage_{:032x}",
         u128::from_be_bytes(rnd)
     ));
@@ -221,16 +234,16 @@ pub fn create_secure_staging_dir(out_dir: &Path, _file_stem: &str) -> Result<(Pa
         use std::os::unix::fs::DirBuilderExt;
         fs::DirBuilder::new()
             .mode(0o700)
-            .create(&stage_dir)
+            .create(&wrapper_dir)
             .map_err(|e| format!("Failed to create secure staging directory: {}", e))?;
     }
     #[cfg(not(unix))]
     {
-        fs::create_dir(&stage_dir)
+        fs::create_dir(&wrapper_dir)
             .map_err(|e| format!("Failed to create secure staging directory: {}", e))?;
     }
 
-    let sentinel_path = stage_dir.join(".active.lock");
+    let sentinel_path = wrapper_dir.join(".active.lock");
     let mut opts = OpenOptions::new();
     opts.read(true).write(true).create_new(true);
     #[cfg(unix)]
@@ -239,27 +252,48 @@ pub fn create_secure_staging_dir(out_dir: &Path, _file_stem: &str) -> Result<(Pa
         opts.mode(0o600);
     }
     let sentinel_file = opts.open(&sentinel_path).map_err(|e| {
-        let _ = fs::remove_dir_all(&stage_dir);
+        let _ = fs::remove_dir_all(&wrapper_dir);
         format!("Failed to create staging directory sentinel lock: {}", e)
     })?;
 
     if let Err(e) = sentinel_file.try_lock_exclusive() {
         drop(sentinel_file);
-        let _ = fs::remove_dir_all(&stage_dir);
-        return Err(format!("Failed to acquire exclusive lock on staging directory sentinel: {}", e));
+        let _ = fs::remove_dir_all(&wrapper_dir);
+        return Err(format!(
+            "Failed to acquire exclusive lock on staging directory sentinel: {}",
+            e
+        ));
     }
 
-    Ok((stage_dir, sentinel_file))
+    let payload_dir = wrapper_dir.join("payload");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        if let Err(e) = fs::DirBuilder::new().mode(0o700).create(&payload_dir) {
+            drop(sentinel_file);
+            let _ = fs::remove_dir_all(&wrapper_dir);
+            return Err(format!("Failed to create staging payload directory: {}", e));
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        if let Err(e) = fs::create_dir(&payload_dir) {
+            drop(sentinel_file);
+            let _ = fs::remove_dir_all(&wrapper_dir);
+            return Err(format!("Failed to create staging payload directory: {}", e));
+        }
+    }
+
+    Ok((wrapper_dir, payload_dir, sentinel_file))
 }
 
-/// Scans only the designated target folder for stale Ombracrypt staging remnants and purges them safely
-pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
+/// Scans only the designated target folder for stale Ombracrypt staging remnants and returns a structured CleanupReport.
+pub fn clean_scoped_staging_dir_report(dir: &Path) -> Result<CleanupReport, String> {
     if !dir.exists() || !dir.is_dir() {
-        return Ok((0, 0));
+        return Ok(CleanupReport::default());
     }
 
-    let mut count = 0usize;
-    let mut freed_bytes = 0u64;
+    let mut report = CleanupReport::default();
 
     let entries = fs::read_dir(dir).map_err(|e| format!("Failed to inspect directory: {}", e))?;
     for entry in entries.flatten() {
@@ -269,6 +303,13 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
 
         // Reject symlinks without traversing them
         let Ok(meta) = fs::symlink_metadata(&path) else {
+            report.failed_count += 1;
+            if report.failed_artifacts.len() < 10 {
+                report.failed_artifacts.push((
+                    path.clone(),
+                    "Failed to read artifact metadata".to_string(),
+                ));
+            }
             continue;
         };
         if meta.file_type().is_symlink() {
@@ -311,16 +352,26 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
 
             #[cfg(unix)]
             {
-                if fs::remove_dir_all(&path).is_ok() {
-                    count += 1;
-                    freed_bytes = freed_bytes.saturating_add(dir_bytes);
+                match fs::remove_dir_all(&path) {
+                    Ok(()) => {
+                        report.removed_count += 1;
+                        report.freed_bytes = report.freed_bytes.saturating_add(dir_bytes);
+                    }
+                    Err(e) => {
+                        report.failed_count += 1;
+                        if report.failed_artifacts.len() < 10 {
+                            report.failed_artifacts.push((
+                                path.clone(),
+                                format!("Failed to remove staging directory: {}", e),
+                            ));
+                        }
+                    }
                 }
                 drop(sentinel_file);
             }
             #[cfg(windows)]
             {
-                // On Windows: Delete inner files, then delete sentinel, drop lock handle, and remove parent dir.
-                // Strict invariant: Never remove .active.lock if any child deletion or enumeration fails.
+                // On Windows: Delete inner files/directories, then delete sentinel, drop lock handle, and remove parent dir.
                 let mut all_children_removed = true;
                 match fs::read_dir(&path) {
                     Ok(sub_entries) => {
@@ -334,21 +385,42 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
                                         } else {
                                             fs::remove_file(&sub_path)
                                         };
-                                        if del_res.is_err() {
+                                        if let Err(e) = del_res {
                                             all_children_removed = false;
+                                            report.failed_count += 1;
+                                            if report.failed_artifacts.len() < 10 {
+                                                report.failed_artifacts.push((
+                                                    sub_path.clone(),
+                                                    format!("Failed to remove staging child: {}", e),
+                                                ));
+                                            }
                                             break;
                                         }
                                     }
                                 }
-                                Err(_) => {
+                                Err(e) => {
                                     all_children_removed = false;
+                                    report.failed_count += 1;
+                                    if report.failed_artifacts.len() < 10 {
+                                        report.failed_artifacts.push((
+                                            path.clone(),
+                                            format!("Failed to read child metadata: {}", e),
+                                        ));
+                                    }
                                     break;
                                 }
                             }
                         }
                     }
-                    Err(_) => {
+                    Err(e) => {
                         all_children_removed = false;
+                        report.failed_count += 1;
+                        if report.failed_artifacts.len() < 10 {
+                            report.failed_artifacts.push((
+                                path.clone(),
+                                format!("Failed to inspect staging directory: {}", e),
+                            ));
+                        }
                     }
                 }
 
@@ -356,11 +428,16 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
                     if fs::remove_file(&sentinel_path).is_ok() {
                         drop(sentinel_file);
                         if fs::remove_dir(&path).is_ok() {
-                            count += 1;
-                            freed_bytes = freed_bytes.saturating_add(dir_bytes);
+                            report.removed_count += 1;
+                            report.freed_bytes = report.freed_bytes.saturating_add(dir_bytes);
                         } else {
-                            // Parent dir removal failed: atomically recreate sentinel under exclusive lock
-                            // so subsequent passes can safely retry cleanup
+                            report.failed_count += 1;
+                            if report.failed_artifacts.len() < 10 {
+                                report.failed_artifacts.push((
+                                    path.clone(),
+                                    "Failed to remove parent staging directory after children were deleted".to_string(),
+                                ));
+                            }
                             if let Ok(recovered_sentinel) = OpenOptions::new()
                                 .read(true)
                                 .write(true)
@@ -373,6 +450,13 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
                         }
                     } else {
                         drop(sentinel_file);
+                        report.failed_count += 1;
+                        if report.failed_artifacts.len() < 10 {
+                            report.failed_artifacts.push((
+                                sentinel_path.clone(),
+                                "Failed to remove active.lock sentinel".to_string(),
+                            ));
+                        }
                     }
                 } else {
                     drop(sentinel_file);
@@ -380,9 +464,20 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
             }
             #[cfg(not(any(unix, windows)))]
             {
-                if fs::remove_dir_all(&path).is_ok() {
-                    count += 1;
-                    freed_bytes = freed_bytes.saturating_add(dir_bytes);
+                match fs::remove_dir_all(&path) {
+                    Ok(()) => {
+                        report.removed_count += 1;
+                        report.freed_bytes = report.freed_bytes.saturating_add(dir_bytes);
+                    }
+                    Err(e) => {
+                        report.failed_count += 1;
+                        if report.failed_artifacts.len() < 10 {
+                            report.failed_artifacts.push((
+                                path.clone(),
+                                format!("Failed to remove staging directory: {}", e),
+                            ));
+                        }
+                    }
                 }
                 drop(sentinel_file);
             }
@@ -405,16 +500,40 @@ pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
             let file_len = meta.len();
 
             // Unlink while the exclusive lock handle remains active in scope
-            if fs::remove_file(&path).is_ok() {
-                freed_bytes = freed_bytes.saturating_add(file_len);
-                count += 1;
+            match fs::remove_file(&path) {
+                Ok(()) => {
+                    report.freed_bytes = report.freed_bytes.saturating_add(file_len);
+                    report.removed_count += 1;
+                }
+                Err(e) => {
+                    report.failed_count += 1;
+                    if report.failed_artifacts.len() < 10 {
+                        report.failed_artifacts.push((
+                            path.clone(),
+                            format!("Failed to remove staging file: {}", e),
+                        ));
+                    }
+                }
             }
             drop(file);
         }
     }
 
     sync_parent_directory(dir);
-    Ok((count, freed_bytes))
+    Ok(report)
+}
+
+/// Backwards-compatible cleaner: Purges stale Ombracrypt staging remnants and returns (count, freed_bytes).
+/// Returns Err if any matching staging artifact failed deletion.
+pub fn clean_scoped_staging_dir(dir: &Path) -> Result<(usize, u64), String> {
+    let report = clean_scoped_staging_dir_report(dir)?;
+    if report.failed_count > 0 {
+        return Err(format!(
+            "Incomplete cleanup: {} staging artifact(s) could not be removed: {:?}",
+            report.failed_count, report.failed_artifacts
+        ));
+    }
+    Ok((report.removed_count, report.freed_bytes))
 }
 
 /// Reads an .obk or .obp key file only after enforcing strict minimum and maximum byte bounds
@@ -506,8 +625,25 @@ impl TempDirGuard {
         }
     }
 
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Explicit fallible cleanup called by the pipeline prior to drop.
+    /// Releases the held sentinel lock descriptor first, then removes the directory tree.
+    pub fn cleanup_fallible(&mut self) -> Result<(), (PathBuf, std::io::Error)> {
+        self.sentinel_lock = None;
+        if self.path.symlink_metadata().is_ok() {
+            if let Err(e) = fs::remove_dir_all(&self.path) {
+                return Err((self.path.clone(), e));
+            }
+        }
+        self.armed = false;
+        unregister_active_staging_path(&self.path);
+        Ok(())
+    }
+
     /// Releases and unlinks the sentinel file cleanly before publication so the target output remains clean.
-    /// Retains ownership of the lock descriptor if unlinking fails to guarantee fail-closed teardown.
     pub fn release_sentinel(&mut self) -> Result<(), String> {
         if self.sentinel_lock.is_some() {
             let sentinel_path = self.path.join(".active.lock");
@@ -528,7 +664,7 @@ impl TempDirGuard {
 impl Drop for TempDirGuard {
     fn drop(&mut self) {
         unregister_active_staging_path(&self.path);
-        if self.armed && self.path.exists() {
+        if self.armed && self.path.symlink_metadata().is_ok() {
             self.sentinel_lock = None;
             let _ = fs::remove_dir_all(&self.path);
         }
@@ -609,8 +745,11 @@ pub fn atomic_publish_noreplace_internal(
                 }
                 Some(libc::EINVAL) => {
                     Err(format!(
-                        "Target filesystem returned EINVAL (unsupported flag or invalid arguments) during atomic publication: {}",
-                        err
+                        "Atomic publication failed: Target filesystem returned EINVAL (os error 22). \
+                        The selected filesystem may not support RENAME_NOREPLACE, or the operation was rejected due to invalid arguments. \
+                        This typically occurs on FUSE mounts (such as NTFS-3G) or eCryptfs encrypted directories that lack kernel flag support. \
+                        Please choose a compatible extraction destination on a native Linux filesystem (ext4, btrfs, exFAT) or remount NTFS volumes using the in-kernel 'ntfs3' driver. \
+                        Existing files and directories were not overwritten."
                     ))
                 }
                 _ => Err(format!(

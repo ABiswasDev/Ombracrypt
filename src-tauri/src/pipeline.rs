@@ -413,8 +413,12 @@ pub fn decrypt_vault_core(
         .ok_or("Invalid vault filename.")?;
 
     let final_extract_dir = out_dir_obj.join(file_stem);
-    let (stage_dir, sentinel_lock) = create_secure_staging_dir(out_dir_obj, file_stem)?;
-    let mut dir_guard = TempDirGuard::with_sentinel(stage_dir.clone(), sentinel_lock);
+
+    // Two-tier staging wrapper architecture:
+    // stage_wrapper contains the .active.lock sentinel, while payload_dir holds the extracted plaintext.
+    let (stage_wrapper, payload_dir, sentinel_lock) =
+        create_secure_staging_dir(out_dir_obj, file_stem)?;
+    let mut dir_guard = TempDirGuard::with_sentinel(stage_wrapper.clone(), sentinel_lock);
 
     let header_end_pos = vault_file.stream_position().map_err(|e| e.to_string())?;
     let vault_body_size = total_vault_len.saturating_sub(header_end_pos);
@@ -439,16 +443,28 @@ pub fn decrypt_vault_core(
     let mut archive = Archive::new(decrypt_reader);
     let max_permitted_bytes = header.uncompressed_bytes.saturating_add(1024 * 1024);
 
-    if let Err(e) = extract_tar_archive_safely(&mut archive, &stage_dir, max_permitted_bytes) {
-        if let Some(ref token) = cancellation_token {
-            if token.load(std::sync::atomic::Ordering::Relaxed) {
-                return Err("Operation aborted by user.".to_string());
-            }
+    if let Err(e) = extract_tar_archive_safely(&mut archive, &payload_dir, max_permitted_bytes) {
+        let is_cancel = cancellation_token
+            .as_ref()
+            .map(|t| t.load(std::sync::atomic::Ordering::Relaxed))
+            .unwrap_or(false)
+            || e.contains("Operation aborted by user");
+
+        let primary_err = if is_cancel {
+            "Operation aborted by user.".to_string()
+        } else {
+            e
+        };
+
+        if let Err((cleanup_path, cleanup_err)) = dir_guard.cleanup_fallible() {
+            return Err(format!(
+                "{} (Warning: Incomplete cleanup: staging directory '{}' could not be removed: {})",
+                primary_err,
+                cleanup_path.display(),
+                cleanup_err
+            ));
         }
-        if e.contains("Operation aborted by user") {
-            return Err("Operation aborted by user.".to_string());
-        }
-        return Err(e);
+        return Err(primary_err);
     }
 
     let mut reader = archive.into_inner();
@@ -456,39 +472,79 @@ pub fn decrypt_vault_core(
     while match reader.read(&mut drain) {
         Ok(n) => n > 0,
         Err(e) => {
-            if let Some(ref token) = cancellation_token {
-                if token.load(std::sync::atomic::Ordering::Relaxed) {
-                    return Err("Operation aborted by user.".to_string());
-                }
+            let is_cancel = cancellation_token
+                .as_ref()
+                .map(|t| t.load(std::sync::atomic::Ordering::Relaxed))
+                .unwrap_or(false)
+                || e.to_string().contains("Operation aborted by user");
+
+            let primary_err = if is_cancel {
+                "Operation aborted by user.".to_string()
+            } else {
+                e.to_string()
+            };
+
+            if let Err((cleanup_path, cleanup_err)) = dir_guard.cleanup_fallible() {
+                return Err(format!(
+                    "{} (Warning: Incomplete cleanup: staging directory '{}' could not be removed: {})",
+                    primary_err,
+                    cleanup_path.display(),
+                    cleanup_err
+                ));
             }
-            let s = e.to_string();
-            if s.contains("Operation aborted by user") {
-                return Err("Operation aborted by user.".to_string());
-            }
-            return Err(s);
+            return Err(primary_err);
         }
     } {}
 
     if let Some(ref token) = cancellation_token {
         if token.load(std::sync::atomic::Ordering::Relaxed) {
-            return Err("Operation aborted by user.".to_string());
+            let primary_err = "Operation aborted by user.".to_string();
+            if let Err((cleanup_path, cleanup_err)) = dir_guard.cleanup_fallible() {
+                return Err(format!(
+                    "{} (Warning: Incomplete cleanup: staging directory '{}' could not be removed: {})",
+                    primary_err,
+                    cleanup_path.display(),
+                    cleanup_err
+                ));
+            }
+            return Err(primary_err);
         }
     }
 
     if !reader.reached_final_chunk {
-        return Err(
-            "Integrity Error: Vault stream ended without a verified final chunk tag.".to_string(),
-        );
+        let primary_err =
+            "Integrity Error: Vault stream ended without a verified final chunk tag.".to_string();
+        if let Err((cleanup_path, cleanup_err)) = dir_guard.cleanup_fallible() {
+            return Err(format!(
+                "{} (Warning: Incomplete cleanup: staging directory '{}' could not be removed: {})",
+                primary_err,
+                cleanup_path.display(),
+                cleanup_err
+            ));
+        }
+        return Err(primary_err);
     }
 
-    // Release and unlink the internal .active.lock sentinel immediately before directory rename.
-    // If removal fails, this call returns Err and dir_guard cleans up the entire tree.
-    dir_guard.release_sentinel()?;
+    // Atomically publish payload_dir directly to final_extract_dir.
+    // The .active.lock sentinel remains in stage_wrapper and NEVER enters final_extract_dir.
+    if let Err(publish_err) = atomic_publish_dir_noreplace(&payload_dir, &final_extract_dir) {
+        let primary_err = format!("Failed to finalize extracted output directory: {}", publish_err);
+        if let Err((cleanup_path, cleanup_err)) = dir_guard.cleanup_fallible() {
+            return Err(format!(
+                "{} (Warning: Incomplete cleanup: staging directory '{}' could not be removed: {})",
+                primary_err,
+                cleanup_path.display(),
+                cleanup_err
+            ));
+        }
+        return Err(primary_err);
+    }
 
-    atomic_publish_dir_noreplace(&stage_dir, &final_extract_dir)
-        .map_err(|e| format!("Failed to finalize extracted output directory: {}", e))?;
     sync_parent_directory(&final_extract_dir);
     sync_parent_directory(out_dir_obj);
+
+    // Clean up the outer wrapper (which now contains only .active.lock)
+    let _ = dir_guard.cleanup_fallible();
     dir_guard.disarm();
 
     let _ = emit_progress(app, 100);

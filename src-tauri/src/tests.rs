@@ -1902,3 +1902,270 @@ fn test_fs_guard_windows_sentinel_identity_and_replacement() {
     drop(sentinel_file);
     drop(other_file);
 }
+
+// =========================================================================
+// SPRINT 11 RELIABILITY HARDENING & STAGING-WRAPPER REGRESSION TESTS
+// =========================================================================
+
+#[test]
+fn test_sprint11_cleanup_reporting_distinguishes_failures_from_clean() {
+    let (ws, _guard) = create_test_workspace("cleanup_report_failures");
+    let stage_dir = ws.join(".ombracrypt_stage_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    fs::create_dir_all(&stage_dir).unwrap();
+    let sentinel_path = stage_dir.join(".active.lock");
+    fs::write(&sentinel_path, b"").unwrap();
+    let nested_file = stage_dir.join("payload.dat");
+    fs::write(&nested_file, vec![0x42u8; 1024]).unwrap();
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // Restricting permissions to 0o500 prevents deleting inner files on Unix
+        fs::set_permissions(&stage_dir, fs::Permissions::from_mode(0o500)).unwrap();
+
+        let report = crate::fs_guard::clean_scoped_staging_dir_report(&ws).unwrap();
+        assert!(
+            report.failed_count > 0,
+            "Cleaner must report failures when directory permissions prevent unlinking"
+        );
+        assert!(
+            !report.failed_artifacts.is_empty(),
+            "Failure details must record unremovable paths"
+        );
+
+        let err_res = crate::fs_guard::clean_scoped_staging_dir(&ws);
+        assert!(
+            err_res.is_err(),
+            "clean_scoped_staging_dir must return Err on incomplete cleanup"
+        );
+
+        // Restore permissions for clean test workspace teardown
+        fs::set_permissions(&stage_dir, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    let report_clean = crate::fs_guard::clean_scoped_staging_dir_report(&ws).unwrap();
+    assert_eq!(report_clean.failed_count, 0);
+    assert_eq!(report_clean.removed_count, 1);
+}
+
+#[test]
+fn test_sprint11_staging_wrapper_prevents_sentinel_in_destination() {
+    let (ws, _guard) = create_test_workspace("wrapper_no_sentinel");
+    let src_dir = ws.join("src");
+    let vault_dir = ws.join("vault");
+    let key_dir = ws.join("keys");
+    let extract_dir = ws.join("out");
+
+    for d in [&src_dir, &vault_dir, &key_dir, &extract_dir] {
+        fs::create_dir_all(d).unwrap();
+    }
+    fs::write(src_dir.join("document.pdf"), b"%PDF-1.4 mock data").unwrap();
+
+    encrypt_vault_core(
+        None,
+        src_dir.to_str().unwrap(),
+        vault_dir.to_str().unwrap(),
+        key_dir.to_str().unwrap(),
+        false,
+        "xchacha20",
+        "xwing",
+        "SecretPassword123!",
+        "",
+        None,
+    )
+    .expect("Encryption should succeed");
+
+    let obv = vault_dir.join("src.obv");
+    let obk = key_dir.join("src.obk");
+
+    decrypt_vault_core(
+        None,
+        obv.to_str().unwrap(),
+        Some(obk.to_str().unwrap()),
+        extract_dir.to_str().unwrap(),
+        "SecretPassword123!",
+        None,
+    )
+    .expect("Decryption should succeed");
+
+    let final_dest = extract_dir.join("src");
+    assert!(final_dest.exists(), "Extracted folder must exist");
+    assert!(
+        final_dest.join("document.pdf").exists(),
+        "Payload must be published"
+    );
+    assert!(
+        fs::symlink_metadata(final_dest.join(".active.lock")).is_err(),
+        "Sentinel must NEVER be present inside the published destination directory"
+    );
+
+    // Staging wrapper must have been completely cleaned up
+    let entries: Vec<_> = fs::read_dir(&extract_dir)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".ombracrypt_stage_"))
+        .collect();
+    assert_eq!(
+        entries.len(),
+        0,
+        "Outer staging wrapper must be wiped after successful publication"
+    );
+}
+
+#[test]
+fn test_sprint11_deterministic_multi_chunk_cancellation_and_staging_cleanup() {
+    let (ws, _guard) = create_test_workspace("multi_chunk_cancel");
+    let src_dir = ws.join("src");
+    let vault_dir = ws.join("vault");
+    let key_dir = ws.join("keys");
+    let extract_dir = ws.join("out");
+
+    for d in [&src_dir, &vault_dir, &key_dir, &extract_dir] {
+        fs::create_dir_all(d).unwrap();
+    }
+
+    // 2.5 MiB payload spanning multiple 1 MiB AEAD chunks
+    let multi_chunk_payload = vec![0x7Au8; (CHUNK_SIZE * 2) + (CHUNK_SIZE / 2)];
+    fs::write(src_dir.join("large_file.bin"), &multi_chunk_payload).unwrap();
+
+    encrypt_vault_core(
+        None,
+        src_dir.to_str().unwrap(),
+        vault_dir.to_str().unwrap(),
+        key_dir.to_str().unwrap(),
+        false,
+        "xchacha20",
+        "xwing",
+        "MasterPassword987!",
+        "",
+        None,
+    )
+    .unwrap();
+
+    let obv = vault_dir.join("src.obv");
+    let obk = key_dir.join("src.obk");
+
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    let flag_clone = cancel_flag.clone();
+    let poll_dir = extract_dir.clone();
+
+    // Polling watcher with a 30s timeout and a 10ms sleep to prevent thread starvation
+    let watcher = thread::spawn(move || {
+        let start = std::time::Instant::now();
+        while start.elapsed() < std::time::Duration::from_secs(30) {
+            if let Ok(entries) = fs::read_dir(&poll_dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_dir()
+                        && p.file_name()
+                            .unwrap()
+                            .to_string_lossy()
+                            .starts_with(".ombracrypt_stage_")
+                    {
+                        let payload_dir = p.join("payload");
+                        if let Ok((bytes, _)) = crate::fs_guard::calculate_dir_metrics(&payload_dir) {
+                            if bytes >= CHUNK_SIZE as u64 {
+                                flag_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        false
+    });
+
+    let res = decrypt_vault_core(
+        None,
+        obv.to_str().unwrap(),
+        Some(obk.to_str().unwrap()),
+        extract_dir.to_str().unwrap(),
+        "MasterPassword987!",
+        Some(cancel_flag),
+    );
+
+    let observed_write = watcher.join().unwrap();
+    assert!(
+        observed_write,
+        "Watcher must observe >= 1 MiB of plaintext written to staging before tripping cancellation"
+    );
+
+    assert!(res.is_err(), "Operation must abort with cancellation error");
+    assert_eq!(
+        res.unwrap_err(),
+        "Operation aborted by user.",
+        "Must return sanitized cancellation error message"
+    );
+
+    let final_dest = extract_dir.join("src");
+    assert!(
+        !final_dest.exists(),
+        "No destination folder must ever be published on cancellation"
+    );
+
+    let remaining_stages = fs::read_dir(&extract_dir)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".ombracrypt_stage_"))
+        .count();
+    assert_eq!(
+        remaining_stages, 0,
+        "Staging wrapper must be completely wiped upon cancellation"
+    );
+}
+
+#[test]
+fn test_sprint11_pipeline_preserves_primary_error_on_cleanup_failure() {
+    let (ws, _guard) = create_test_workspace("primary_err_preservation");
+    let src_dir = ws.join("src");
+    let vault_dir = ws.join("vault");
+    let key_dir = ws.join("keys");
+    let extract_dir = ws.join("out");
+
+    for d in [&src_dir, &vault_dir, &key_dir, &extract_dir] {
+        fs::create_dir_all(d).unwrap();
+    }
+    fs::write(src_dir.join("test.bin"), vec![0x11u8; 1024]).unwrap();
+
+    encrypt_vault_core(
+        None,
+        src_dir.to_str().unwrap(),
+        vault_dir.to_str().unwrap(),
+        key_dir.to_str().unwrap(),
+        false,
+        "aes256gcm",
+        "xwing",
+        "Pass123",
+        "",
+        None,
+    )
+    .unwrap();
+
+    let obv = vault_dir.join("src.obv");
+    let obk = key_dir.join("src.obk");
+
+    // Corrupt vault ciphertext chunk
+    let mut bytes = fs::read(&obv).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0xFF;
+    fs::write(&obv, &bytes).unwrap();
+
+    let res = decrypt_vault_core(
+        None,
+        obv.to_str().unwrap(),
+        Some(obk.to_str().unwrap()),
+        extract_dir.to_str().unwrap(),
+        "Pass123",
+        None,
+    );
+
+    assert!(res.is_err());
+    let err_msg = res.unwrap_err();
+    assert!(
+        err_msg.contains("Decryption Failed! Data corruption or mismatched cryptographic key."),
+        "Primary cryptographic tag mismatch error must be preserved: {}",
+        err_msg
+    );
+}
