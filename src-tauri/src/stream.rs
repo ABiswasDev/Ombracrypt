@@ -51,6 +51,22 @@ pub fn clear_and_zeroize_buffer(buf: &mut Zeroizing<Vec<u8>>) {
     buf.clear();
 }
 
+/// Helper that inspects both top-level and causal error chains to identify user abort errors
+pub fn is_cancellation_error(err: &std::io::Error) -> bool {
+    use std::error::Error;
+    if err.to_string().contains("Operation aborted by user") {
+        return true;
+    }
+    let mut source = err.source();
+    while let Some(e) = source {
+        if e.to_string().contains("Operation aborted by user") {
+            return true;
+        }
+        source = e.source();
+    }
+    false
+}
+
 /// Serializes the OMBV\x02 header and computes its SHA-256 digest for AEAD AAD binding
 pub fn build_and_hash_header(
     cipher_id: u8,
@@ -227,11 +243,10 @@ pub fn extract_tar_archive_safely<R: Read>(
     max_permitted_bytes: u64,
 ) -> Result<(), String> {
     let entries = archive.entries().map_err(|e| {
-        let s = e.to_string();
-        if s.contains("Operation aborted by user") {
+        if is_cancellation_error(&e) {
             "Operation aborted by user.".to_string()
         } else {
-            format!("Failed to read encrypted archive stream: {}", s)
+            format!("Failed to read encrypted archive stream: {}", e)
         }
     })?;
 
@@ -241,8 +256,7 @@ pub fn extract_tar_archive_safely<R: Read>(
 
     for entry_res in entries {
         let mut entry = entry_res.map_err(|e| {
-            let s = e.to_string();
-            if s.contains("Operation aborted by user") {
+            if is_cancellation_error(&e) {
                 "Operation aborted by user.".to_string()
             } else {
                 e.to_string()
@@ -329,13 +343,12 @@ pub fn extract_tar_archive_safely<R: Read>(
             entry.set_preserve_permissions(false);
             entry.set_unpack_xattrs(false);
 
-            // Intercept mid-stream unpack cancellation errors cleanly
+            // Intercept mid-stream unpack cancellation errors cleanly through the causal error chain
             if let Err(e) = entry.unpack(&dest_path) {
-                let s = e.to_string();
-                if s.contains("Operation aborted by user") {
+                if is_cancellation_error(&e) {
                     return Err("Operation aborted by user.".to_string());
                 }
-                return Err(format!("Failed to unpack file: {}", s));
+                return Err(format!("Failed to unpack file: {}", e));
             }
 
             #[cfg(unix)]

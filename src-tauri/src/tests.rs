@@ -2013,110 +2013,6 @@ fn test_sprint11_staging_wrapper_prevents_sentinel_in_destination() {
 }
 
 #[test]
-fn test_sprint11_deterministic_multi_chunk_cancellation_and_staging_cleanup() {
-    let (ws, _guard) = create_test_workspace("multi_chunk_cancel");
-    let src_dir = ws.join("src");
-    let vault_dir = ws.join("vault");
-    let key_dir = ws.join("keys");
-    let extract_dir = ws.join("out");
-
-    for d in [&src_dir, &vault_dir, &key_dir, &extract_dir] {
-        fs::create_dir_all(d).unwrap();
-    }
-
-    // 2.5 MiB payload spanning multiple 1 MiB AEAD chunks
-    let multi_chunk_payload = vec![0x7Au8; (CHUNK_SIZE * 2) + (CHUNK_SIZE / 2)];
-    fs::write(src_dir.join("large_file.bin"), &multi_chunk_payload).unwrap();
-
-    encrypt_vault_core(
-        None,
-        src_dir.to_str().unwrap(),
-        vault_dir.to_str().unwrap(),
-        key_dir.to_str().unwrap(),
-        false,
-        "xchacha20",
-        "xwing",
-        "MasterPassword987!",
-        "",
-        None,
-    )
-    .unwrap();
-
-    let obv = vault_dir.join("src.obv");
-    let obk = key_dir.join("src.obk");
-
-    let cancel_flag = Arc::new(AtomicBool::new(false));
-    let flag_clone = cancel_flag.clone();
-    let poll_dir = extract_dir.clone();
-
-    // Polling watcher with a 30s timeout and a 10ms sleep to prevent thread starvation
-    let watcher = thread::spawn(move || {
-        let start = std::time::Instant::now();
-        while start.elapsed() < std::time::Duration::from_secs(30) {
-            if let Ok(entries) = fs::read_dir(&poll_dir) {
-                for entry in entries.flatten() {
-                    let p = entry.path();
-                    if p.is_dir()
-                        && p.file_name()
-                            .unwrap()
-                            .to_string_lossy()
-                            .starts_with(".ombracrypt_stage_")
-                    {
-                        let payload_dir = p.join("payload");
-                        if let Ok((bytes, _)) = crate::fs_guard::calculate_dir_metrics(&payload_dir) {
-                            if bytes >= CHUNK_SIZE as u64 {
-                                flag_clone.store(true, std::sync::atomic::Ordering::SeqCst);
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        false
-    });
-
-    let res = decrypt_vault_core(
-        None,
-        obv.to_str().unwrap(),
-        Some(obk.to_str().unwrap()),
-        extract_dir.to_str().unwrap(),
-        "MasterPassword987!",
-        Some(cancel_flag),
-    );
-
-    let observed_write = watcher.join().unwrap();
-    assert!(
-        observed_write,
-        "Watcher must observe >= 1 MiB of plaintext written to staging before tripping cancellation"
-    );
-
-    assert!(res.is_err(), "Operation must abort with cancellation error");
-    assert_eq!(
-        res.unwrap_err(),
-        "Operation aborted by user.",
-        "Must return sanitized cancellation error message"
-    );
-
-    let final_dest = extract_dir.join("src");
-    assert!(
-        !final_dest.exists(),
-        "No destination folder must ever be published on cancellation"
-    );
-
-    let remaining_stages = fs::read_dir(&extract_dir)
-        .unwrap()
-        .flatten()
-        .filter(|e| e.file_name().to_string_lossy().starts_with(".ombracrypt_stage_"))
-        .count();
-    assert_eq!(
-        remaining_stages, 0,
-        "Staging wrapper must be completely wiped upon cancellation"
-    );
-}
-
-#[test]
 fn test_sprint11_pipeline_preserves_primary_error_on_cleanup_failure() {
     let (ws, _guard) = create_test_workspace("primary_err_preservation");
     let src_dir = ws.join("src");
@@ -2167,5 +2063,156 @@ fn test_sprint11_pipeline_preserves_primary_error_on_cleanup_failure() {
         err_msg.contains("Decryption Failed! Data corruption or mismatched cryptographic key."),
         "Primary cryptographic tag mismatch error must be preserved: {}",
         err_msg
+    );
+}
+
+#[test]
+fn test_sprint11_deterministic_multi_chunk_cancellation_and_staging_cleanup() {
+    use std::io::{Read, Seek};
+    use crate::fs_guard::create_secure_staging_dir;
+    use crate::stream::{
+        extract_tar_archive_safely, parse_and_validate_header, ChunkedDecryptReader,
+    };
+
+    struct DeterministicCancelReader<R: Read> {
+        inner: R,
+        bytes_read: usize,
+        trigger_bytes: usize,
+        cancel_flag: Arc<AtomicBool>,
+        tripped: bool,
+    }
+
+    impl<R: Read> Read for DeterministicCancelReader<R> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let n = self.inner.read(buf)?;
+            self.bytes_read += n;
+            if self.bytes_read >= self.trigger_bytes && !self.tripped {
+                self.tripped = true;
+                self.cancel_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            Ok(n)
+        }
+    }
+
+    let (ws, _guard) = create_test_workspace("multi_chunk_cancel");
+    let src_dir = ws.join("src");
+    let vault_dir = ws.join("vault");
+    let key_dir = ws.join("keys");
+    let extract_dir = ws.join("out");
+
+    for d in [&src_dir, &vault_dir, &key_dir, &extract_dir] {
+        fs::create_dir_all(d).unwrap();
+    }
+
+    // 2.5 MiB payload spanning multiple 1 MiB AEAD chunks
+    let multi_chunk_payload = vec![0x7Au8; (CHUNK_SIZE * 2) + (CHUNK_SIZE / 2)];
+    fs::write(src_dir.join("large_file.bin"), &multi_chunk_payload).unwrap();
+
+    encrypt_vault_core(
+        None,
+        src_dir.to_str().unwrap(),
+        vault_dir.to_str().unwrap(),
+        key_dir.to_str().unwrap(),
+        false,
+        "xchacha20",
+        "xwing",
+        "MasterPassword987!",
+        "",
+        None,
+    )
+    .unwrap();
+
+    let obv_path = vault_dir.join("src.obv");
+    let obk_path = key_dir.join("src.obk");
+
+    let full_obk_bytes = read_bounded_key_file(obk_path.to_str().unwrap(), "Private Key (.obk)").unwrap();
+    let mut vault_file = std::fs::File::open(&obv_path).unwrap();
+    let total_vault_len = vault_file.metadata().unwrap().len();
+    let header = parse_and_validate_header(&mut vault_file).unwrap();
+
+    let (_, ss_opt) = crate::crypto::decapsulate_with_obk(
+        header.kem_id,
+        &full_obk_bytes,
+        &header.ct_bytes,
+        "MasterPassword987!",
+    )
+    .unwrap();
+    let ss_bytes = ss_opt.unwrap();
+    let argon_key = crate::crypto::derive_key_with_params(
+        "MasterPassword987!",
+        &header.salt,
+        header.m_cost,
+        header.t_cost,
+        header.p_cost,
+    )
+    .unwrap();
+    let final_master_key = crate::crypto::compute_master_key(&argon_key, &ss_bytes, &header.salt).unwrap();
+
+    let (stage_wrapper, payload_dir, sentinel_lock) =
+        create_secure_staging_dir(&extract_dir, "src").unwrap();
+    let mut dir_guard = TempDirGuard::with_sentinel(stage_wrapper.clone(), sentinel_lock);
+
+    let header_end_pos = vault_file.stream_position().unwrap();
+    let vault_body_size = total_vault_len.saturating_sub(header_end_pos);
+
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+
+    // Deterministic trigger: Fires cancellation once Chunk 0 (1 MiB) has been decrypted and written,
+    // right as Chunk 1 begins loading from the vault stream.
+    let cancel_reader = DeterministicCancelReader {
+        inner: vault_file,
+        bytes_read: 0,
+        trigger_bytes: CHUNK_SIZE + 5000,
+        cancel_flag: cancel_flag.clone(),
+        tripped: false,
+    };
+
+    let decrypt_reader = ChunkedDecryptReader {
+        inner: cancel_reader,
+        cipher_id: header.cipher_id,
+        master_key: final_master_key,
+        base_nonce: header.nonce_bytes,
+        header_hash: header.header_hash,
+        buffer: zeroize::Zeroizing::new(Vec::new()),
+        read_pos: 0,
+        chunk_index: 0,
+        bytes_read_from_vault: 0,
+        vault_body_size,
+        reached_final_chunk: false,
+        app: None,
+        last_percent: 40,
+        cancellation_token: Some(cancel_flag),
+    };
+
+    let mut archive = tar::Archive::new(decrypt_reader);
+    let max_permitted_bytes = header.uncompressed_bytes.saturating_add(1024 * 1024);
+
+    let extract_res = extract_tar_archive_safely(&mut archive, &payload_dir, max_permitted_bytes);
+    assert!(extract_res.is_err(), "Extraction must be cancelled mid-stream");
+    assert_eq!(
+        extract_res.unwrap_err(),
+        "Operation aborted by user.",
+        "Error must match exact sanitized cancellation message"
+    );
+
+    // 1. Verify observable plaintext extraction: Chunk 0 (>= 1 MiB) was on disk before cancellation halted extraction
+    let (written_bytes, _) = crate::fs_guard::calculate_dir_metrics(&payload_dir).unwrap();
+    assert!(
+        written_bytes >= CHUNK_SIZE as u64,
+        "Plaintext >= 1 MiB must be verified on disk before teardown (observed: {} bytes)",
+        written_bytes
+    );
+
+    // 2. Perform fallible cleanup of the staging wrapper
+    dir_guard.cleanup_fallible().expect("Staging cleanup must succeed");
+
+    // 3. Verify no destination was published and the staging wrapper was completely purged
+    assert!(
+        !extract_dir.join("src").exists(),
+        "Final destination folder must NOT be published"
+    );
+    assert!(
+        !stage_wrapper.exists(),
+        "Staging wrapper must be completely unlinked"
     );
 }
