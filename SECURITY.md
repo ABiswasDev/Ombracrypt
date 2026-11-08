@@ -11,7 +11,7 @@ Ombracrypt is currently transitioning from legacy classical builds to post-quant
 
 ## Reporting a Vulnerability
 
-As an offline-first cryptographic vault designed for post-quantum forward secrecy, Ombracrypt takes implementation correctness, memory safety, and cryptographic integrity seriously.
+As an offline-first cryptographic vault designed for hybrid post-quantum confidentiality, Ombracrypt takes implementation correctness, memory safety, and cryptographic integrity seriously.
 
 **Please do not report security vulnerabilities via public GitHub issues, discussions, or pull requests.** Public disclosure before a remediation patch is released exposes all active users to unnecessary risk.
 

@@ -36,7 +36,7 @@ Every Ombracrypt operation revolves around three distinct file types:
 | Artifact | File Extension | Role | Sensitivity | Distribution |
 | :--- | :--- | :--- | :--- | :--- |
 | **Encrypted Vault** | `.obv` | Authenticated ciphertext container holding directory trees and data chunks. | Ciphertext | Public / Cloud / Shared Drives |
-| **Private Quantum Key** | `.obk` | Contains wrapped hybrid private key material (ML-KEM + X25519) required for decryption. | **CRITICAL SECRET** | Keep strictly offline / Air-gapped |
+| **Private Quantum Key** | `.obk` | Contains serialized hybrid private key material (ML-KEM + X25519) required for decryption. | **CRITICAL SECRET** | Keep strictly offline / Air-gapped |
 | **Public Sealing Key** | `.obp` | Asymmetric public key used by contributors to seal new vaults for a recipient. | Public Information | Share freely with teams/pipelines |
 
 ---
@@ -150,10 +150,10 @@ The Deception Passcode is a cryptographic zeroization mechanism designed for phy
 2. **Duress Invocation:** When forced to open the vault under duress, enter the **Deception Passcode** in the password field instead of the real password.
 3. **Plausible Error Display:** The application displays an authentic, indistinguishable authentication error:  
    `Decryption Failed! Data corruption or mismatched cryptographic key.`
-4. **Permanent In-Place Zeroization:** Behind the scenes, the engine opens the targeted `.obk` file and irreversibly overwrites the encapsulated key payload with random noise from an OS-level CSPRNG (`getrandom`/`BCryptGenRandom`). Outer headers and file sizes remain completely unchanged.
-5. **Irreversible Neutralization:** Because Ombracrypt relies on split-factor cryptography, destroying the `.obk` private key payload breaks the mathematical chain forever. The `.obv` vault becomes mathematically unrecoverable to everyone, including yourself and the adversary.
+4. **In-Place Overwrite Attempt:** Behind the scenes, the engine opens the targeted `.obk` file and overwrites the key payload in place with random noise from an OS-level CSPRNG (`getrandom`/`BCryptGenRandom`). Outer headers and file sizes remain completely unchanged.
+5. **Key Neutralization:** Overwriting the local `.obk` private key payload breaks the mathematical decapsulation chain for that specific file copy. Without an independent offline backup copy of that `.obk`, the vault cannot be decrypted.
 
-> **Warning:** Duress zeroization executes instantly and permanently destroys the target `.obk` file. Never test your duress code against your only copy of a production key.
+> **Warning:** Duress execution attempts an in-place cryptographic overwrite against the selected local `.obk` file. Physical erasure cannot be guaranteed on solid-state media (SSDs/NVMe) subject to controller-level wear-leveling, filesystem snapshots, copy-on-write filesystems, or where secondary offline backups exist. Never test your duress code against your only copy of a production key.
 
 ---
 

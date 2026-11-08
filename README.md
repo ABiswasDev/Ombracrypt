@@ -228,7 +228,7 @@ Writing and extracting archives on shared or untrusted storage introduces race c
 
 ### Staging Lifecycle & Permissions
 * **Restricted Staging Artifacts:** Staged files use a strict 54-byte namespace (`.ombracrypt_part_<32hex>.part`). Private key staging files enforce strict `0600` (owner read/write) permissions on Unix. Extraction directories use a strict 50-byte namespace (`.ombracrypt_stage_<32hex>`) with `0700` (owner read/write/traverse) permissions on Unix. Public keys (`.obp`) and vault archives (`.obv`) inherit standard system umask permissions.
-* **Sentinel Locking:** Active extraction staging directories contain an exclusively locked `.active.lock` file descriptor.
+* **Staging-Wrapper Sentinel Isolation:** Extraction stages inside an outer wrapper (`.ombracrypt_stage_<hex>`) containing an exclusively locked `.active.lock` sentinel file and an isolated inner `payload/` directory. Plaintext unpacks strictly into `payload/`. During final promotion, `payload/` is atomically published to the destination, while `.active.lock` remains inside the outer wrapper and is unlinked during wrapper teardown. The sentinel never enters the published destination folder.
 * **Post-Lock File-Identity Validation:** Background cleaners attempting to sweep abandoned directories verify the locked file handle against the filesystem before unlinking. On Unix, the cleaner verifies `st_nlink > 0` and checks matching `st_dev` and `st_ino`. On Windows, the cleaner inspects `BY_HANDLE_FILE_INFORMATION` via `GetFileInformationByHandle` to confirm volume serial number and file index matching, preventing stale-handle deletion races.
 * **Process-Local Registry:** A thread-safe global registry tracks active staging paths within the running process, preventing internal worker threads from cleaning files currently being written.
 
@@ -270,7 +270,7 @@ Untrusted TAR archives inside `.obv` containers pass through defensive boundary 
 * **Offline Phantom Block Analysis:** The Duress Trapdoor is an interactive countermeasure. An adversary who clones the `.obk` file prior to the interaction can bypass the in-place overwrite.
 * **Flash Storage Wear-Leveling Residue:** Overwriting an `.obk` file flushes CSPRNG noise to the filesystem, but SSD controllers using dynamic wear-leveling may retain latent physical flash blocks until trimmed or garbage-collected.
 * **Decryption Staging Residue:** Encryption streams directly from memory without writing temporary TAR archives to disk. Decryption extracts validated plaintext files into a restricted local staging folder before atomic publication. A crash or power loss during extraction can leave partial plaintext files in that staging folder until cleared by the user.
-* **Linux Extraction Filesystem Compatibility:** Final extraction requires atomic no-replace directory publication. Some Linux mounts, notably eCryptfs and NTFS-3G/FUSE, may reject `RENAME_NOREPLACE` (`EINVAL`). Use a compatible destination filesystem such as ext4 or the tested native exFAT driver.
+* **Linux Extraction Filesystem Compatibility:** Final extraction requires atomic no-replace directory publication (`RENAME_NOREPLACE`). Certain overlay mounts (such as eCryptfs) and userspace FUSE drivers (such as `ntfs-3g`) reject this syscall with `EINVAL` (os error 22). Ombracrypt detects this condition, leaves all files untouched, and outputs actionable diagnostic guidance advising extraction to native Linux filesystems (ext4, btrfs, exFAT) or remounting NTFS volumes via the in-kernel `ntfs3` driver.
 
 ---
 
@@ -283,7 +283,7 @@ cd src-tauri
 cargo test --release
 ```
 
-At the latest audited commit, the test suite reported 53 passing tests on Ubuntu, 53 on macOS, and 49 on Windows (platform-gated tests account for the variance).
+At the latest audited commit, the test suite reported 57 passing tests on Ubuntu, 57 on macOS, and 57 on Windows across optimized release configurations.
 
 ### Coverage Breakdown
 
