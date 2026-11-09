@@ -59,6 +59,27 @@ pub fn is_staging_path_active(path: &Path) -> bool {
     false
 }
 
+/// Identifies whether a lock error is due to active lock contention rather than I/O or permissions failure
+fn is_lock_contention(err: &std::io::Error) -> bool {
+    if err.kind() == std::io::ErrorKind::WouldBlock {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        // ERROR_LOCK_VIOLATION = 33
+        if err.raw_os_error() == Some(33) {
+            return true;
+        }
+    }
+    #[cfg(unix)]
+    {
+        if err.raw_os_error() == Some(libc::EWOULDBLOCK) || err.raw_os_error() == Some(libc::EAGAIN) {
+            return true;
+        }
+    }
+    false
+}
+
 #[derive(Serialize)]
 pub struct SpaceAssessment {
     pub required_bytes: u64,
@@ -235,9 +256,22 @@ pub fn clean_scoped_staging_dir_report(dir: &Path) -> Result<CleanupReport, Stri
                 }
             };
 
-            if sentinel_file.try_lock_exclusive().is_err() {
-                report.active_skipped_count += 1;
-                continue;
+            match sentinel_file.try_lock_exclusive() {
+                Ok(()) => {}
+                Err(e) if is_lock_contention(&e) => {
+                    report.active_skipped_count += 1;
+                    continue;
+                }
+                Err(e) => {
+                    report.failed_count += 1;
+                    if report.failed_artifacts.len() < 10 {
+                        report.failed_artifacts.push((
+                            sentinel_path,
+                            format!("Failed to lock sentinel file: {}", e),
+                        ));
+                    }
+                    continue;
+                }
             }
 
             if !verify_locked_sentinel(&sentinel_file, &sentinel_path) {
@@ -268,9 +302,22 @@ pub fn clean_scoped_staging_dir_report(dir: &Path) -> Result<CleanupReport, Stri
                 }
             };
 
-            if file.try_lock_exclusive().is_err() {
-                report.active_skipped_count += 1;
-                continue;
+            match file.try_lock_exclusive() {
+                Ok(()) => {}
+                Err(e) if is_lock_contention(&e) => {
+                    report.active_skipped_count += 1;
+                    continue;
+                }
+                Err(e) => {
+                    report.failed_count += 1;
+                    if report.failed_artifacts.len() < 10 {
+                        report.failed_artifacts.push((
+                            path,
+                            format!("Failed to lock staging file: {}", e),
+                        ));
+                    }
+                    continue;
+                }
             }
 
             let file_len = meta.len();
@@ -380,12 +427,15 @@ impl TempDirGuard {
         &self.path
     }
 
+    /// Explicit cleanup: Unconditionally disarms the guard so Drop never triggers
+    /// an out-of-band sweep without ownership lock validation.
     pub fn cleanup_fallible(&mut self) -> Result<(), (PathBuf, std::io::Error)> {
+        self.armed = false;
+        unregister_active_staging_path(&self.path);
+
         match self.path.symlink_metadata() {
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                self.armed = false;
-                unregister_active_staging_path(&self.path);
                 return Ok(());
             }
             Err(e) => return Err((self.path.clone(), e)),
@@ -403,11 +453,7 @@ impl TempDirGuard {
         }
 
         let sentinel_path = self.path.join(".active.lock");
-        platform::teardown_staging_dir(&self.path, &sentinel_path, self.sentinel_lock.take())?;
-
-        self.armed = false;
-        unregister_active_staging_path(&self.path);
-        Ok(())
+        platform::teardown_staging_dir(&self.path, &sentinel_path, self.sentinel_lock.take())
     }
 
     pub fn release_sentinel(&mut self) -> Result<(), String> {

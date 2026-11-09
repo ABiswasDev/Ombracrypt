@@ -357,6 +357,27 @@ pub fn decrypt_vault_core(
     main_pin: &str,
     cancellation_token: Option<Arc<AtomicBool>>,
 ) -> Result<String, String> {
+    decrypt_vault_core_internal(
+        app,
+        vault_path,
+        key_path,
+        output_dir,
+        main_pin,
+        cancellation_token,
+        false,
+    )
+}
+
+/// Core On-the-Fly Streaming Decryption Pipeline with deterministic failure injection support
+pub fn decrypt_vault_core_internal(
+    app: Option<&AppHandle>,
+    vault_path: &str,
+    key_path: Option<&str>,
+    output_dir: &str,
+    main_pin: &str,
+    cancellation_token: Option<Arc<AtomicBool>>,
+    simulate_cleanup_failure: bool,
+) -> Result<String, String> {
     emit_progress(app, 10)?;
 
     let key_path_str = key_path.ok_or("No Private Key (.obk) selected for decryption!")?;
@@ -544,7 +565,20 @@ pub fn decrypt_vault_core(
     sync_parent_directory(out_dir_obj);
 
     // Clean up outer wrapper (which now contains only .active.lock)
-    let cleanup_warning = match dir_guard.cleanup_fallible() {
+    let cleanup_res = if simulate_cleanup_failure {
+        let _ = dir_guard.cleanup_fallible();
+        Err((
+            stage_wrapper.clone(),
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Simulated post-publish wrapper cleanup failure for regression testing",
+            ),
+        ))
+    } else {
+        dir_guard.cleanup_fallible()
+    };
+
+    let cleanup_warning = match cleanup_res {
         Ok(()) => String::new(),
         Err((path, e)) => {
             format!(

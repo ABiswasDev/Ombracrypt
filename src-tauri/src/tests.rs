@@ -13,7 +13,7 @@ use crate::fs_guard::{
     create_public_staging_file, read_bounded_key_file, verify_locked_sentinel,
     CommitRollbackGuard, TempDirGuard, MAX_KEY_FILE_BYTES,
 };
-use crate::pipeline::{decrypt_vault_core, encrypt_vault_core};
+use crate::pipeline::{decrypt_vault_core, decrypt_vault_core_internal, encrypt_vault_core};
 use crate::stream::{sanitize_tar_path, validate_tar_entry_type, CHUNK_SIZE};
 
 fn create_test_workspace(name: &str) -> (PathBuf, TempDirGuard) {
@@ -2063,6 +2063,74 @@ fn test_sprint11_pipeline_preserves_primary_error_on_cleanup_failure() {
         err_msg.contains("Decryption Failed! Data corruption or mismatched cryptographic key."),
         "Primary cryptographic tag mismatch error must be preserved: {}",
         err_msg
+    );
+}
+
+#[test]
+fn test_sprint11_success_path_cleanup_warning_simulated() {
+    let (ws, _guard) = create_test_workspace("success_cleanup_warn");
+    let src_dir = ws.join("src");
+    let vault_dir = ws.join("vault");
+    let key_dir = ws.join("keys");
+    let extract_dir = ws.join("out");
+
+    for d in [&src_dir, &vault_dir, &key_dir, &extract_dir] {
+        fs::create_dir_all(d).unwrap();
+    }
+    let secret_payload = b"CRITICAL_USER_DATA_PRESERVED_ON_WARNING";
+    fs::write(src_dir.join("document.txt"), secret_payload).unwrap();
+
+    encrypt_vault_core(
+        None,
+        src_dir.to_str().unwrap(),
+        vault_dir.to_str().unwrap(),
+        key_dir.to_str().unwrap(),
+        false,
+        "xchacha20",
+        "xwing",
+        "MasterPassword999!",
+        "",
+        None,
+    )
+    .expect("Encryption should succeed");
+
+    let obv = vault_dir.join("src.obv");
+    let obk = key_dir.join("src.obk");
+
+    // Decrypt with simulated post-publication wrapper cleanup failure
+    let res = decrypt_vault_core_internal(
+        None,
+        obv.to_str().unwrap(),
+        Some(obk.to_str().unwrap()),
+        extract_dir.to_str().unwrap(),
+        "MasterPassword999!",
+        None,
+        true, // simulate_cleanup_failure
+    );
+
+    assert!(res.is_ok(), "Operation must return Ok because payload publication succeeded");
+    let msg = res.unwrap();
+    assert!(
+        msg.contains("Operation Successful: Vault authenticated and extracted directly in memory."),
+        "Success message must cite authentication and extraction: {}",
+        msg
+    );
+    assert!(
+        msg.contains("Warning: Vault published successfully, but staging wrapper"),
+        "Success message must include the wrapper cleanup failure warning: {}",
+        msg
+    );
+
+    // Verify the published files exist and are intact
+    let published_file = extract_dir.join("src/document.txt");
+    assert!(
+        published_file.exists(),
+        "Published output file must exist despite wrapper cleanup warning"
+    );
+    assert_eq!(
+        fs::read(&published_file).unwrap(),
+        secret_payload,
+        "Extracted data must be intact and uncorrupted"
     );
 }
 

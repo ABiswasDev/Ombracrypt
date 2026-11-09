@@ -224,7 +224,7 @@ Ombracrypt includes an optional defensive countermeasure for physical coercion s
 
 ## Filesystem Safety & Defensive Architecture
 
-Writing and extracting archives on shared or untrusted storage introduces race conditions and namespace collisions. Ombracrypt addresses these through defensive filesystem guards implemented in `src-tauri/src/fs_guard.rs`.
+Writing and extracting archives on shared or untrusted storage introduces race conditions and namespace collisions. Ombracrypt addresses these through defensive filesystem guards implemented in `src-tauri/src/fs_guard/`.
 
 ### Staging Lifecycle & Permissions
 * **Restricted Staging Artifacts:** Staged files use a strict 54-byte namespace (`.ombracrypt_part_<32hex>.part`). Private key staging files enforce strict `0600` (owner read/write) permissions on Unix. Extraction directories use a strict 50-byte namespace (`.ombracrypt_stage_<32hex>`) with `0700` (owner read/write/traverse) permissions on Unix. Public keys (`.obp`) and vault archives (`.obv`) inherit standard system umask permissions.
@@ -269,7 +269,7 @@ Untrusted TAR archives inside `.obv` containers pass through defensive boundary 
 * **Zero-Escrow Recovery:** There are no backdoors, recovery keys, or escrow bypasses. A lost Master Password or lost `.obk` file renders data permanently unrecoverable.
 * **Offline Phantom Block Analysis:** The Duress Trapdoor is an interactive countermeasure. An adversary who clones the `.obk` file prior to the interaction can bypass the in-place overwrite.
 * **Flash Storage Wear-Leveling Residue:** Overwriting an `.obk` file flushes CSPRNG noise to the filesystem, but SSD controllers using dynamic wear-leveling may retain latent physical flash blocks until trimmed or garbage-collected.
-* **Decryption Staging Residue & Crash Recovery:** Encryption streams directly from memory without staging unencrypted TAR archives on disk. Decryption extracts plaintext into a restricted, two-tier staging wrapper (`.ombracrypt_stage_<hex>/payload/`) guarded by an exclusively locked `.active.lock` sentinel. If interrupted by crash or power loss, residual uncommitted plaintext remains bounded within that wrapper and can be safely identified and swept using the scoped staging cleaner.
+* **Decryption Staging Residue & Crash Recovery:** Encryption streams directly from memory without staging unencrypted TAR archives on disk. Decryption extracts plaintext into a restricted, two-tier staging wrapper (`.ombracrypt_stage_<hex>/payload/`) guarded by an exclusively locked `.active.lock` sentinel. If interrupted by crash or power loss, residual uncommitted plaintext remains bounded within that wrapper and is eligible for automated cleanup attempts once the sentinel is valid and unlocked.
 * **Linux Extraction Filesystem Compatibility:** Final extraction requires atomic no-replace directory publication (`RENAME_NOREPLACE`). Certain filesystem drivers or mount overlays (notably userspace FUSE mounts such as `ntfs-3g` and eCryptfs) reject this flag with `EINVAL` (os error 22). Ombracrypt fails closed without clobbering existing files and provides actionable diagnostics advising extraction to native Linux filesystems (such as ext4 or btrfs) or remounting NTFS partitions with the in-kernel `ntfs3` driver.
 
 ---
@@ -283,7 +283,7 @@ cd src-tauri
 cargo test --release
 ```
 
-At the latest audited commit, the test suite reported 57 passing tests on Ubuntu, 57 on macOS, and 57 on Windows across optimized release configurations.
+At the latest audited commit, the test suite reported 58 passing tests on Ubuntu, 58 on macOS, and 54 on Windows across optimized release configurations (Windows omits Unix-specific file permission and symlink tests).
 
 ### Coverage Breakdown
 
