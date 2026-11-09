@@ -543,10 +543,20 @@ pub fn decrypt_vault_core(
     sync_parent_directory(&final_extract_dir);
     sync_parent_directory(out_dir_obj);
 
-    // Clean up the outer wrapper (which now contains only .active.lock)
-    let _ = dir_guard.cleanup_fallible();
-    dir_guard.disarm();
+    // Clean up outer wrapper (which now contains only .active.lock)
+    let cleanup_warning = match dir_guard.cleanup_fallible() {
+        Ok(()) => String::new(),
+        Err((path, e)) => {
+            format!(
+                " (Warning: Vault published successfully, but staging wrapper '{}' could not be removed: {})",
+                path.display(),
+                e
+            )
+        }
+    };
 
     let _ = emit_progress(app, 100);
-    Ok("Operation Successful: Vault authenticated and extracted directly in memory.".to_string())
+    Ok(format!(
+        "Operation Successful: Vault authenticated and extracted directly in memory.{cleanup_warning}"
+    ))
 }
