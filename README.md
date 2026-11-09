@@ -365,7 +365,7 @@ ombracrypt/
 │   ├── tauri.conf.json                # Fixed 650x900 window geometry & app metadata
 │   ├── capabilities/
 │   │   └── default.json               # Desktop security policy & IPC permissions
-│   ├── icons/                         # Desktop application icon set
+│   ├── icons/                         # Desktop and mobile application icon sets
 │   ├── tests/
 │   │   └── fixtures/
 │   │       └── xwing_revision11/      # CIRCL v1.6.5 Known-Answer Test fixtures
@@ -373,7 +373,12 @@ ombracrypt/
 │       ├── main.rs                    # Desktop application entry point
 │       ├── lib.rs                     # Tauri command handlers & application state
 │       ├── crypto.rs                  # Hybrid KEM (X-Wing & Cypherpunk), Argon2id, HKDF
-│       ├── fs_guard.rs                # Staging namespaces, sentinel locking, atomic commit
+│       ├── fs_guard/                  # Modular platform facade (Linux, macOS, Windows)
+│       │   ├── mod.rs                 # Shared validation, SpaceAssessment, CleanupReport
+│       │   ├── linux.rs               # Linux renameat2 & POSIX lock teardown
+│       │   ├── macos.rs               # macOS renamex_np & POSIX lock teardown
+│       │   ├── windows.rs             # Win32 MoveFileExW & handle-safe teardown
+│       │   └── fallback.rs            # Generic platform fallback
 │       ├── pipeline.rs                # Streaming encryption & decryption controllers
 │       ├── stream.rs                  # In-memory chunked AEAD readers/writers & TAR guards
 │       ├── deception.rs               # Duress key scrambling & metadata validation
