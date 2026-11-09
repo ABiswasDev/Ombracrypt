@@ -131,7 +131,7 @@ pub fn rename_noreplace(src: &Path, dst: &Path, simulate_unsupported: bool) -> R
         const ERROR_ALREADY_EXISTS: u32 = 183;
         return match err_code {
             ERROR_FILE_EXISTS | ERROR_ALREADY_EXISTS => {
-                Err(format!("Refusing to overwrite existing destination: {}", dst.display()))
+                Err(format!("Refusing to overwrite existing file: {}", dst.display()))
             }
             _ => Err(format!(
                 "Failed to commit artifact {} via MoveFileExW (error code {}): {}",

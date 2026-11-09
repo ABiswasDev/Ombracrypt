@@ -90,7 +90,7 @@ pub fn rename_noreplace(src: &Path, dst: &Path, simulate_unsupported: bool) -> R
         let err = std::io::Error::last_os_error();
         return match err.raw_os_error() {
             Some(libc::EEXIST) => {
-                Err(format!("Refusing to overwrite existing destination: {}", dst.display()))
+                Err(format!("Refusing to overwrite existing file: {}", dst.display()))
             }
             Some(libc::ENOTSUP) | Some(libc::ENOSYS) => {
                 Err(format!(
