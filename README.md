@@ -241,7 +241,7 @@ Ombracrypt implements two distinct publication pathways depending on whether the
    * **macOS:** `libc::renamex_np` with `RENAME_EXCL`
    * **Windows:** `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING`
    Directories are never published through hard links.
-3. **Fail-Closed Guarantees:** If the target directory or file already exists—or is a dangling symlink—publication fails closed with an explicit error, leaving existing user files untouched. If the underlying filesystem lacks support for atomic no-replace operations, the operation aborts to prevent silent data clobbering.
+3. **Fail-Closed Guarantees:** If the target directory or file already exists—or is a dangling symlink—publication fails closed with an explicit error, leaving existing user files untouched. On unsupported operating systems (`fallback.rs`) or filesystems lacking kernel-enforced locking and atomic no-replace publication semantics, the engine acts as an intentional fail-closed security boundary and refuses execution rather than falling back to racy userspace approximations.
 
 ### Best-Effort Transactional Rollback
 Staging operations for multi-file commits (such as `.obv`, `.obk`, and `.obp` creation) are tracked by `CommitRollbackGuard`. If publication of a subsequent artifact fails, the transaction guard attempts to remove artifacts already committed during the operation. This rollback is not crash-atomic across multiple filesystem entries. Unexpected process termination, power loss, kernel failure, or filesystem errors may leave partially published artifacts behind.
@@ -269,8 +269,11 @@ Untrusted TAR archives inside `.obv` containers pass through defensive boundary 
 * **Zero-Escrow Recovery:** There are no backdoors, recovery keys, or escrow bypasses. A lost Master Password or lost `.obk` file renders data permanently unrecoverable.
 * **Offline Phantom Block Analysis:** The Duress Trapdoor is an interactive countermeasure. An adversary who clones the `.obk` file prior to the interaction can bypass the in-place overwrite.
 * **Flash Storage Wear-Leveling Residue:** Overwriting an `.obk` file flushes CSPRNG noise to the filesystem, but SSD controllers using dynamic wear-leveling may retain latent physical flash blocks until trimmed or garbage-collected.
-* **Decryption Staging Residue & Crash Recovery:** Encryption streams directly from memory without staging unencrypted TAR archives on disk. Decryption extracts plaintext into a restricted, two-tier staging wrapper (`.ombracrypt_stage_<hex>/payload/`) guarded by an exclusively locked `.active.lock` sentinel. If interrupted by crash or power loss, residual uncommitted plaintext remains bounded within that wrapper and is eligible for automated cleanup attempts once the sentinel is valid and unlocked.
+* **Decryption Staging Residue & Crash Recovery:** Encryption streams directly from memory without staging unencrypted TAR archives on disk. Decryption extracts plaintext into a restricted, two-tier staging wrapper (`.ombracrypt_stage_<hex>/payload/`) guarded by an exclusively locked `.active.lock` sentinel. If interrupted by a crash or power loss:
+  * **Markerless Empty Wrappers:** Abandoned `.ombracrypt_stage_<hex>` directories containing zero entries (such as remnants left when a crash occurs after payload publication) are safely removed non-recursively.
+  * **Unowned Non-Empty Directories:** Any staging-named folder lacking a valid `.active.lock` that contains unrecognized files is strictly preserved and flagged as unowned/skipped to protect arbitrary user data from deletion.
 * **Linux Extraction Filesystem Compatibility:** Final extraction requires atomic no-replace directory publication (`RENAME_NOREPLACE`). Certain filesystem drivers or mount overlays (notably userspace FUSE mounts such as `ntfs-3g` and eCryptfs) reject this flag with `EINVAL` (os error 22). Ombracrypt fails closed without clobbering existing files and provides actionable diagnostics advising extraction to native Linux filesystems (such as ext4 or btrfs) or remounting NTFS partitions with the in-kernel `ntfs3` driver.
+* **Reclaimed Space Metrics:** Space metrics reported during staging cleanup (`report.freed_bytes`) are best-effort estimates calculated via pre-deletion directory traversal (`calculate_dir_metrics`), rather than guaranteed byte-exact measurements, to account for concurrent unlinking, non-regular files, or filesystem block allocation differences.
 
 ---
 
@@ -283,7 +286,7 @@ cd src-tauri
 cargo test --release
 ```
 
-At the latest audited commit, the test suite reported 58 passing tests on Ubuntu, 58 on macOS, and 54 on Windows across optimized release configurations (Windows omits Unix-specific file permission and symlink tests).
+Comprehensive regression and Known-Answer Test (KAT) suites run automatically across Ubuntu, macOS, and Windows on every commit via GitHub Actions (Windows omits Unix-specific file permission and symlink test cases). Up-to-date execution status and test run metrics are tracked in the repository's [CI Workflow](https://github.com/ABiswasDev/Ombracrypt/actions/workflows/ci.yml).
 
 ### Coverage Breakdown
 
@@ -378,7 +381,7 @@ ombracrypt/
 │       │   ├── linux.rs               # Linux renameat2 & POSIX lock teardown
 │       │   ├── macos.rs               # macOS renamex_np & POSIX lock teardown
 │       │   ├── windows.rs             # Win32 MoveFileExW & handle-safe teardown
-│       │   └── fallback.rs            # Generic platform fallback
+│       │   └── fallback.rs            # Fail-closed security boundary for unsupported platforms
 │       ├── pipeline.rs                # Streaming encryption & decryption controllers
 │       ├── stream.rs                  # In-memory chunked AEAD readers/writers & TAR guards
 │       ├── deception.rs               # Duress key scrambling & metadata validation

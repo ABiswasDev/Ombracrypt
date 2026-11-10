@@ -151,7 +151,7 @@ The Deception Passcode is a cryptographic zeroization mechanism designed for phy
 3. **Plausible Error Display:** The application displays an authentic, indistinguishable authentication error:  
    `Decryption Failed! Data corruption or mismatched cryptographic key.`
 4. **In-Place Overwrite Attempt:** Behind the scenes, the engine opens the targeted `.obk` file and overwrites the key payload in place with random noise from an OS-level CSPRNG (`getrandom`/`BCryptGenRandom`). Outer headers and file sizes remain completely unchanged.
-5. **Key Neutralization:** Overwriting the local `.obk` private key payload breaks the mathematical decapsulation chain for that specific file copy. Without an independent offline backup copy of that `.obk`, the vault cannot be decrypted.
+5. **Key Neutralization:** Overwriting the local `.obk` private key payload breaks the mathematical decapsulation chain for that specific file copy. If no other usable copy of the private key exists, overwriting the selected `.obk` prevents decryption using that key material. Previously copied keys and storage-level remnants remain outside this protection.
 
 > **Warning:** Duress execution attempts an in-place cryptographic overwrite against the selected local `.obk` file. Physical erasure cannot be guaranteed on solid-state media (SSDs/NVMe) subject to controller-level wear-leveling, filesystem snapshots, copy-on-write filesystems, or where secondary offline backups exist. Never test your duress code against your only copy of a production key.
 
