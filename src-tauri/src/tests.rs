@@ -13,7 +13,7 @@ use crate::fs_guard::{
     create_public_staging_file, read_bounded_key_file, verify_locked_sentinel,
     CommitRollbackGuard, TempDirGuard, MAX_KEY_FILE_BYTES,
 };
-use crate::pipeline::{decrypt_vault_core, decrypt_vault_core_internal, encrypt_vault_core};
+use crate::pipeline::{decrypt_vault_core, encrypt_vault_core};
 use crate::stream::{sanitize_tar_path, validate_tar_entry_type, CHUNK_SIZE};
 
 fn create_test_workspace(name: &str) -> (PathBuf, TempDirGuard) {
@@ -2111,15 +2111,26 @@ fn test_sprint11_success_path_cleanup_warning_simulated() {
     let obv = vault_dir.join("src.obv");
     let obk = key_dir.join("src.obk");
 
-    // Decrypt with simulated post-publication wrapper cleanup failure
-    let res = decrypt_vault_core_internal(
+    // Decrypt using test-only closure injection to simulate post-publication wrapper cleanup failure
+    let res = crate::pipeline::decrypt_vault_core_for_test(
         None,
         obv.to_str().unwrap(),
         Some(obk.to_str().unwrap()),
         extract_dir.to_str().unwrap(),
         "MasterPassword999!",
         None,
-        true, // simulate_cleanup_failure
+        |guard| {
+            guard.cleanup_fallible_with(|wrapper, _sentinel, lock| {
+                drop(lock);
+                Err((
+                    wrapper.to_path_buf(),
+                    std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "Injected post-publish wrapper teardown failure",
+                    ),
+                ))
+            })
+        },
     );
 
     assert!(res.is_ok(), "Operation must return Ok because payload publication succeeded");
@@ -2369,4 +2380,40 @@ fn test_cleaner_reclaims_markerless_empty_staging_wrapper() {
 
     assert!(!empty_stage.exists(), "Empty wrapper must be gone");
     assert!(non_empty_stage.exists(), "Non-empty unowned directory must be preserved");
+}
+
+#[test]
+fn test_clean_staging_artifacts_multi_folder_aggregation() {
+    let (ws, _guard) = create_test_workspace("multi_folder_clean");
+    let dir_a = ws.join("dir_a");
+    let dir_b_missing = ws.join("dir_b_missing");
+    let dir_c = ws.join("dir_c");
+
+    fs::create_dir_all(&dir_a).unwrap();
+    fs::create_dir_all(&dir_c).unwrap();
+
+    let stale_part_a = dir_a.join(".ombracrypt_part_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.part");
+    fs::write(&stale_part_a, vec![0x11u8; 1024]).unwrap();
+
+    let stale_part_c = dir_c.join(".ombracrypt_part_cccccccccccccccccccccccccccccccc.part");
+    fs::write(&stale_part_c, vec![0x33u8; 2048]).unwrap();
+
+    let input_paths = vec![
+        dir_a.to_str().unwrap().to_string(),
+        dir_b_missing.to_str().unwrap().to_string(),
+        dir_c.to_str().unwrap().to_string(),
+        dir_a.to_str().unwrap().to_string(), // Duplicate entry to verify lexical deduplication
+    ];
+
+    let (report, ui_res) = crate::clean_staging_artifacts_aggregated(input_paths);
+    assert_eq!(report.removed_count, 2, "Accessible directories must be cleaned");
+    assert_eq!(report.freed_bytes, 3072);
+    assert_eq!(report.failed_count, 1, "Missing directory must be aggregated as a failure item");
+    assert!(
+        report.failed_artifacts.iter().any(|(p, r)| p == &dir_b_missing && r.contains("Selected directory does not exist")),
+        "Failure details must report missing folder path and error"
+    );
+    assert!(!stale_part_a.exists());
+    assert!(!stale_part_c.exists());
+    assert!(ui_res.is_ok(), "UI message must report warning/partial success, not Err");
 }

@@ -348,7 +348,7 @@ pub fn decrypt_vault(
     )
 }
 
-/// Core On-the-Fly Streaming Decryption Pipeline
+/// Production decryption entry point. Contains zero test simulation parameters.
 pub fn decrypt_vault_core(
     app: Option<&AppHandle>,
     vault_path: &str,
@@ -357,27 +357,55 @@ pub fn decrypt_vault_core(
     main_pin: &str,
     cancellation_token: Option<Arc<AtomicBool>>,
 ) -> Result<String, String> {
-    decrypt_vault_core_internal(
+    decrypt_vault_core_impl(
         app,
         vault_path,
         key_path,
         output_dir,
         main_pin,
         cancellation_token,
-        false,
+        |guard| guard.cleanup_fallible(),
     )
 }
 
-/// Core On-the-Fly Streaming Decryption Pipeline with deterministic failure injection support
-pub fn decrypt_vault_core_internal(
+/// Test-only wrapper with closure injection for deterministic fault testing.
+#[cfg(test)]
+pub(crate) fn decrypt_vault_core_for_test<F>(
     app: Option<&AppHandle>,
     vault_path: &str,
     key_path: Option<&str>,
     output_dir: &str,
     main_pin: &str,
     cancellation_token: Option<Arc<AtomicBool>>,
-    simulate_cleanup_failure: bool,
-) -> Result<String, String> {
+    custom_teardown: F,
+) -> Result<String, String>
+where
+    F: FnOnce(&mut TempDirGuard) -> Result<(), (PathBuf, std::io::Error)>,
+{
+    decrypt_vault_core_impl(
+        app,
+        vault_path,
+        key_path,
+        output_dir,
+        main_pin,
+        cancellation_token,
+        custom_teardown,
+    )
+}
+
+/// Private shared engine executing authentic authentication, decryption, and atomic publication.
+fn decrypt_vault_core_impl<F>(
+    app: Option<&AppHandle>,
+    vault_path: &str,
+    key_path: Option<&str>,
+    output_dir: &str,
+    main_pin: &str,
+    cancellation_token: Option<Arc<AtomicBool>>,
+    teardown_fn: F,
+) -> Result<String, String>
+where
+    F: FnOnce(&mut TempDirGuard) -> Result<(), (PathBuf, std::io::Error)>,
+{
     emit_progress(app, 10)?;
 
     let key_path_str = key_path.ok_or("No Private Key (.obk) selected for decryption!")?;
@@ -435,8 +463,6 @@ pub fn decrypt_vault_core_internal(
 
     let final_extract_dir = out_dir_obj.join(file_stem);
 
-    // Two-tier staging wrapper architecture:
-    // stage_wrapper contains the .active.lock sentinel, while payload_dir holds the extracted plaintext.
     let (stage_wrapper, payload_dir, sentinel_lock) =
         create_secure_staging_dir(out_dir_obj, file_stem)?;
     let mut dir_guard = TempDirGuard::with_sentinel(stage_wrapper.clone(), sentinel_lock);
@@ -546,8 +572,6 @@ pub fn decrypt_vault_core_internal(
         return Err(primary_err);
     }
 
-    // Atomically publish payload_dir directly to final_extract_dir.
-    // The .active.lock sentinel remains in stage_wrapper and NEVER enters final_extract_dir.
     if let Err(publish_err) = atomic_publish_dir_noreplace(&payload_dir, &final_extract_dir) {
         let primary_err = format!("Failed to finalize extracted output directory: {}", publish_err);
         if let Err((cleanup_path, cleanup_err)) = dir_guard.cleanup_fallible() {
@@ -564,22 +588,7 @@ pub fn decrypt_vault_core_internal(
     sync_parent_directory(&final_extract_dir);
     sync_parent_directory(out_dir_obj);
 
-    // Clean up outer wrapper (which now contains only .active.lock).
-    // During failure injection, drop the sentinel lock but leave the wrapper and sentinel intact on disk.
-    let cleanup_res = if simulate_cleanup_failure {
-        dir_guard.cleanup_fallible_with(|wrapper, _sentinel, lock| {
-            drop(lock);
-            Err((
-                wrapper.to_path_buf(),
-                std::io::Error::new(
-                    std::io::ErrorKind::PermissionDenied,
-                    "Injected post-publish wrapper teardown failure",
-                ),
-            ))
-        })
-    } else {
-        dir_guard.cleanup_fallible()
-    };
+    let cleanup_res = teardown_fn(&mut dir_guard);
 
     let cleanup_warning = match cleanup_res {
         Ok(()) => String::new(),

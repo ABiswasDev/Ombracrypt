@@ -57,7 +57,6 @@ pub fn create_secure_staging_dir(
     Ok(sentinel_file)
 }
 
-/// Windows sentinel validation using Win32 GetFileInformationByHandle.
 pub fn verify_locked_sentinel(sentinel_file: &File, sentinel_path: &Path) -> bool {
     let Ok(locked_meta) = sentinel_file.metadata() else {
         return false;
@@ -105,7 +104,6 @@ pub fn verify_locked_sentinel(sentinel_file: &File, sentinel_path: &Path) -> boo
         && locked_info.nFileIndexLow == recheck_info.nFileIndexLow
 }
 
-/// Windows atomic no-replace publication via MoveFileExW.
 pub fn rename_noreplace(src: &Path, dst: &Path, simulate_unsupported: bool) -> Result<(), String> {
     if simulate_unsupported {
         return Err(format!(
@@ -121,7 +119,7 @@ pub fn rename_noreplace(src: &Path, dst: &Path, simulate_unsupported: bool) -> R
         windows_sys::Win32::Storage::FileSystem::MoveFileExW(
             wide_src.as_ptr(),
             wide_dst.as_ptr(),
-            0, // Deliberately omit MOVEFILE_REPLACE_EXISTING
+            0,
         )
     };
 
@@ -145,6 +143,7 @@ pub fn rename_noreplace(src: &Path, dst: &Path, simulate_unsupported: bool) -> R
 }
 
 /// Windows teardown: Closes lock handle immediately before unlinking sentinel, then unlinks directory.
+/// Idempotent on NotFound so concurrent cleaners sweeping an already empty directory do not cause false warnings.
 pub fn teardown_staging_dir(
     wrapper_dir: &Path,
     sentinel_path: &Path,
@@ -155,20 +154,22 @@ pub fn teardown_staging_dir(
     match fs::symlink_metadata(sentinel_path) {
         Ok(_) => {
             if let Err(e) = fs::remove_file(sentinel_path) {
-                return Err((sentinel_path.to_path_buf(), e));
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    return Err((sentinel_path.to_path_buf(), e));
+                }
             }
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err((sentinel_path.to_path_buf(), e)),
     }
 
-    if let Err(e) = fs::remove_dir(wrapper_dir) {
-        return Err((wrapper_dir.to_path_buf(), e));
+    match fs::remove_dir(wrapper_dir) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err((wrapper_dir.to_path_buf(), e)),
     }
-    Ok(())
 }
 
-/// Windows staged directory cleanup handling NTFS file-sharing semantics.
 pub fn clean_staged_dir(
     path: &Path,
     sentinel_path: &Path,

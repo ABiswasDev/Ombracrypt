@@ -59,14 +59,12 @@ pub fn is_staging_path_active(path: &Path) -> bool {
     false
 }
 
-/// Identifies whether a lock error is due to active lock contention rather than I/O or permissions failure
 fn is_lock_contention(err: &std::io::Error) -> bool {
     if err.kind() == std::io::ErrorKind::WouldBlock {
         return true;
     }
     #[cfg(windows)]
     {
-        // ERROR_LOCK_VIOLATION = 33
         if err.raw_os_error() == Some(33) {
             return true;
         }
@@ -92,7 +90,6 @@ pub struct SpaceAssessment {
     pub summary: String,
 }
 
-/// Structured report returned by staging cleanup operations.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 pub struct CleanupReport {
     pub removed_count: usize,
@@ -234,8 +231,6 @@ pub fn clean_scoped_staging_dir_report(dir: &Path) -> Result<CleanupReport, Stri
             }
         };
 
-        // Conservative deletion policy: never traverse or delete symlinks.
-        // Surface staging-named symlinks in failed_artifacts for auditability.
         if meta.file_type().is_symlink() {
             if is_valid_staging_dir_name(&name_str) || is_valid_staging_file_name(&name_str) {
                 report.failed_count += 1;
@@ -263,14 +258,12 @@ pub fn clean_scoped_staging_dir_report(dir: &Path) -> Result<CleanupReport, Stri
                     continue;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    // Safe reclamation: if sentinel is absent, check whether the wrapper is strictly empty.
                     let is_empty = match fs::read_dir(&path) {
                         Ok(mut it) => it.next().is_none(),
                         Err(_) => false,
                     };
 
                     if is_empty {
-                        // Non-recursive remove_dir fails at kernel boundary if any child exists.
                         match fs::remove_dir(&path) {
                             Ok(()) => {
                                 report.removed_count += 1;
@@ -487,13 +480,19 @@ impl TempDirGuard {
         &self.path
     }
 
-    /// Standard platform cleanup invoking OS-specific teardown.
     pub fn cleanup_fallible(&mut self) -> Result<(), (PathBuf, std::io::Error)> {
-        self.cleanup_fallible_with(platform::teardown_staging_dir)
+        self.cleanup_fallible_internal(platform::teardown_staging_dir)
     }
 
-    /// Teardown with dependency-injected teardown function for deterministic failure testing.
-    pub fn cleanup_fallible_with<F>(&mut self, teardown_fn: F) -> Result<(), (PathBuf, std::io::Error)>
+    #[cfg(test)]
+    pub(crate) fn cleanup_fallible_with<F>(&mut self, teardown_fn: F) -> Result<(), (PathBuf, std::io::Error)>
+    where
+        F: FnOnce(&Path, &Path, Option<File>) -> Result<(), (PathBuf, std::io::Error)>,
+    {
+        self.cleanup_fallible_internal(teardown_fn)
+    }
+
+    fn cleanup_fallible_internal<F>(&mut self, teardown_fn: F) -> Result<(), (PathBuf, std::io::Error)>
     where
         F: FnOnce(&Path, &Path, Option<File>) -> Result<(), (PathBuf, std::io::Error)>,
     {
