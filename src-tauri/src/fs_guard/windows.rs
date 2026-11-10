@@ -264,8 +264,6 @@ fn clean_staged_dir_internal<F>(
         drop(sentinel_file);
         post_lock_drop_hook();
 
-        // 1. Remove sentinel file:
-        // Accept Ok(()) and NotFound (already unlinked by extractor or competing cleaner) as success.
         let sentinel_cleared = match fs::remove_file(sentinel_path) {
             Ok(()) => true,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
@@ -281,19 +279,13 @@ fn clean_staged_dir_internal<F>(
             }
         };
 
-        // 2. Remove wrapper directory if sentinel was removed or already absent:
         if sentinel_cleared {
             match fs::remove_dir(path) {
                 Ok(()) => {
-                    // Actual successful deletion performed by this cleaner instance:
                     report.removed_count += 1;
                     report.freed_bytes = report.freed_bytes.saturating_add(dir_bytes);
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    // Already unlinked by extractor or competing cleaner:
-                    // Cleanup objective accomplished. Do NOT increment removed_count or freed_bytes
-                    // to prevent double-counting, and do NOT record a failure.
-                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => {
                     report.failed_count += 1;
                     if report.failed_artifacts.len() < 10 {
@@ -317,15 +309,39 @@ pub fn clean_staged_file(
     file_len: u64,
     report: &mut CleanupReport,
 ) {
+    clean_staged_file_internal(path, file, file_len, report, || ())
+}
+
+#[cfg(test)]
+pub(crate) fn clean_staged_file_for_test<F>(
+    path: &Path,
+    file: File,
+    file_len: u64,
+    report: &mut CleanupReport,
+    post_lock_drop_hook: F,
+) where
+    F: FnOnce(),
+{
+    clean_staged_file_internal(path, file, file_len, report, post_lock_drop_hook)
+}
+
+fn clean_staged_file_internal<F>(
+    path: &Path,
+    file: File,
+    file_len: u64,
+    report: &mut CleanupReport,
+    post_lock_drop_hook: F,
+) where
+    F: FnOnce(),
+{
     drop(file);
+    post_lock_drop_hook();
     match fs::remove_file(path) {
         Ok(()) => {
             report.removed_count += 1;
             report.freed_bytes = report.freed_bytes.saturating_add(file_len);
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            // Already unlinked by competing process: do not increment counts, do not fail.
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => {
             report.failed_count += 1;
             if report.failed_artifacts.len() < 10 {

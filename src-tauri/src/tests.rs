@@ -2533,3 +2533,42 @@ fn test_windows_teardown_concurrency_extractor_wins() {
     assert_eq!(cleaner_report.freed_bytes, 0, "Cleaner must not double-count freed bytes performed by extractor");
     assert!(!stage_dir.exists(), "Staging wrapper directory must not exist on disk");
 }
+
+#[cfg(windows)]
+#[test]
+fn test_windows_clean_staged_file_concurrency_race() {
+    let (ws, _guard) = create_test_workspace("win_staged_file_race");
+    let file_path = ws.join(".ombracrypt_part_11112222333344445555666677778888.part");
+
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(&file_path)
+        .unwrap();
+    file.try_lock_exclusive().unwrap();
+    file.write_all(b"CONFIDENTIAL_STAGED_KEY_MATERIAL").unwrap();
+    file.sync_all().unwrap();
+
+    let mut report = crate::fs_guard::CleanupReport::default();
+    let file_path_clone = file_path.clone();
+
+    // Call test hook: immediately after the cleaner releases its exclusive handle,
+    // simulate a competing process or thread unlinking the file before fs::remove_file runs.
+    crate::fs_guard::windows::clean_staged_file_for_test(
+        &file_path,
+        file,
+        32,
+        &mut report,
+        move || {
+            let res = fs::remove_file(&file_path_clone);
+            assert!(res.is_ok(), "External unlinking must succeed once lock is dropped");
+        },
+    );
+
+    assert!(!file_path.exists(), "Staged file must no longer exist on disk");
+    assert_eq!(report.failed_count, 0, "NotFound must be treated as clean absence, not a failure");
+    assert!(report.failed_artifacts.is_empty(), "Failed artifacts list must be empty");
+    assert_eq!(report.removed_count, 0, "Cleaner must not double-count deletion performed externally");
+    assert_eq!(report.freed_bytes, 0, "Cleaner must not double-count freed bytes performed externally");
+}
