@@ -21,7 +21,6 @@ use crate::stream::{
     ChunkedDecryptReader, ChunkedEncryptWriter, CHUNK_SIZE,
 };
 
-/// Standalone helper to generate a reusable Group/Individual Keypair (.obp Public + .obk Private)
 pub fn generate_standalone_keypair(
     output_dir: &str,
     key_name: &str,
@@ -79,7 +78,6 @@ pub fn generate_standalone_keypair(
     ))
 }
 
-/// Tauri wrapper for encryption
 pub fn encrypt_vault(
     app: &AppHandle,
     target_path: &str,
@@ -106,7 +104,6 @@ pub fn encrypt_vault(
     )
 }
 
-/// Core On-the-Fly Streaming Encryption Pipeline
 pub fn encrypt_vault_core(
     app: Option<&AppHandle>,
     target_path: &str,
@@ -329,7 +326,6 @@ pub fn encrypt_vault_core(
     }
 }
 
-/// Tauri wrapper for decryption
 pub fn decrypt_vault(
     app: &AppHandle,
     vault_path: &str,
@@ -348,7 +344,6 @@ pub fn decrypt_vault(
     )
 }
 
-/// Production decryption entry point. Contains zero test simulation parameters.
 pub fn decrypt_vault_core(
     app: Option<&AppHandle>,
     vault_path: &str,
@@ -368,7 +363,6 @@ pub fn decrypt_vault_core(
     )
 }
 
-/// Test-only wrapper with closure injection for deterministic fault testing.
 #[cfg(test)]
 pub(crate) fn decrypt_vault_core_for_test<F>(
     app: Option<&AppHandle>,
@@ -393,7 +387,6 @@ where
     )
 }
 
-/// Private shared engine executing authentic authentication, decryption, and atomic publication.
 fn decrypt_vault_core_impl<F>(
     app: Option<&AppHandle>,
     vault_path: &str,

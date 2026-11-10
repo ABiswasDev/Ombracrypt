@@ -222,12 +222,10 @@ pub fn clean_staging_artifacts_aggregated(paths: Vec<String>) -> (CleanupReport,
     (aggregated_report, ui_result)
 }
 
-/// Structured report retrieval for engine callers and tests.
 pub fn clean_staging_artifacts_report(paths: Vec<String>) -> Result<CleanupReport, String> {
     Ok(clean_staging_artifacts_aggregated(paths).0)
 }
 
-/// Core formatted string result for CLI and frontend consumers.
 pub fn clean_staging_artifacts_core(paths: Vec<String>) -> Result<String, String> {
     clean_staging_artifacts_aggregated(paths).1
 }

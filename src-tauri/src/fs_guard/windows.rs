@@ -177,6 +177,33 @@ pub fn clean_staged_dir(
     dir_bytes: u64,
     report: &mut CleanupReport,
 ) {
+    clean_staged_dir_internal(path, sentinel_path, sentinel_file, dir_bytes, report, || ())
+}
+
+#[cfg(test)]
+pub(crate) fn clean_staged_dir_for_test<F>(
+    path: &Path,
+    sentinel_path: &Path,
+    sentinel_file: File,
+    dir_bytes: u64,
+    report: &mut CleanupReport,
+    post_lock_drop_hook: F,
+) where
+    F: FnOnce(),
+{
+    clean_staged_dir_internal(path, sentinel_path, sentinel_file, dir_bytes, report, post_lock_drop_hook)
+}
+
+fn clean_staged_dir_internal<F>(
+    path: &Path,
+    sentinel_path: &Path,
+    sentinel_file: File,
+    dir_bytes: u64,
+    report: &mut CleanupReport,
+    post_lock_drop_hook: F,
+) where
+    F: FnOnce(),
+{
     let mut all_children_removed = true;
     match fs::read_dir(path) {
         Ok(sub_entries) => {
@@ -191,15 +218,17 @@ pub fn clean_staged_dir(
                                 fs::remove_file(&sub_path)
                             };
                             if let Err(e) = del_res {
-                                all_children_removed = false;
-                                report.failed_count += 1;
-                                if report.failed_artifacts.len() < 10 {
-                                    report.failed_artifacts.push((
-                                        sub_path,
-                                        format!("Failed to remove staging child: {}", e),
-                                    ));
+                                if e.kind() != std::io::ErrorKind::NotFound {
+                                    all_children_removed = false;
+                                    report.failed_count += 1;
+                                    if report.failed_artifacts.len() < 10 {
+                                        report.failed_artifacts.push((
+                                            sub_path,
+                                            format!("Failed to remove staging child: {}", e),
+                                        ));
+                                    }
+                                    break;
                                 }
-                                break;
                             }
                         }
                     }
@@ -218,43 +247,67 @@ pub fn clean_staged_dir(
             }
         }
         Err(e) => {
-            all_children_removed = false;
-            report.failed_count += 1;
-            if report.failed_artifacts.len() < 10 {
-                report.failed_artifacts.push((
-                    path.to_path_buf(),
-                    format!("Failed to inspect staging directory: {}", e),
-                ));
+            if e.kind() != std::io::ErrorKind::NotFound {
+                all_children_removed = false;
+                report.failed_count += 1;
+                if report.failed_artifacts.len() < 10 {
+                    report.failed_artifacts.push((
+                        path.to_path_buf(),
+                        format!("Failed to inspect staging directory: {}", e),
+                    ));
+                }
             }
         }
     }
 
     if all_children_removed {
         drop(sentinel_file);
-        if fs::remove_file(sentinel_path).is_ok() {
-            if fs::remove_dir(path).is_ok() {
-                report.removed_count += 1;
-                report.freed_bytes = report.freed_bytes.saturating_add(dir_bytes);
-            } else {
+        post_lock_drop_hook();
+
+        // 1. Remove sentinel file:
+        // Accept Ok(()) and NotFound (already unlinked by extractor or competing cleaner) as success.
+        let sentinel_cleared = match fs::remove_file(sentinel_path) {
+            Ok(()) => true,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+            Err(e) => {
                 report.failed_count += 1;
                 if report.failed_artifacts.len() < 10 {
                     report.failed_artifacts.push((
-                        path.to_path_buf(),
-                        "Failed to remove parent staging directory after children were deleted".to_string(),
+                        sentinel_path.to_path_buf(),
+                        format!("Failed to remove .active.lock sentinel: {}", e),
                     ));
                 }
+                false
             }
-        } else {
-            report.failed_count += 1;
-            if report.failed_artifacts.len() < 10 {
-                report.failed_artifacts.push((
-                    sentinel_path.to_path_buf(),
-                    "Failed to remove .active.lock sentinel".to_string(),
-                ));
+        };
+
+        // 2. Remove wrapper directory if sentinel was removed or already absent:
+        if sentinel_cleared {
+            match fs::remove_dir(path) {
+                Ok(()) => {
+                    // Actual successful deletion performed by this cleaner instance:
+                    report.removed_count += 1;
+                    report.freed_bytes = report.freed_bytes.saturating_add(dir_bytes);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    // Already unlinked by extractor or competing cleaner:
+                    // Cleanup objective accomplished. Do NOT increment removed_count or freed_bytes
+                    // to prevent double-counting, and do NOT record a failure.
+                }
+                Err(e) => {
+                    report.failed_count += 1;
+                    if report.failed_artifacts.len() < 10 {
+                        report.failed_artifacts.push((
+                            path.to_path_buf(),
+                            format!("Failed to remove parent staging directory: {}", e),
+                        ));
+                    }
+                }
             }
         }
     } else {
         drop(sentinel_file);
+        post_lock_drop_hook();
     }
 }
 
@@ -269,6 +322,9 @@ pub fn clean_staged_file(
         Ok(()) => {
             report.removed_count += 1;
             report.freed_bytes = report.freed_bytes.saturating_add(file_len);
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // Already unlinked by competing process: do not increment counts, do not fail.
         }
         Err(e) => {
             report.failed_count += 1;

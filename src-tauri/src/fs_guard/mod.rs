@@ -268,6 +268,7 @@ pub fn clean_scoped_staging_dir_report(dir: &Path) -> Result<CleanupReport, Stri
                             Ok(()) => {
                                 report.removed_count += 1;
                             }
+                            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
                             Err(err) => {
                                 report.failed_count += 1;
                                 if report.failed_artifacts.len() < 10 {

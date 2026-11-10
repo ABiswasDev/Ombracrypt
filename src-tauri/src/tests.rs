@@ -2417,3 +2417,119 @@ fn test_clean_staging_artifacts_multi_folder_aggregation() {
     assert!(!stale_part_c.exists());
     assert!(ui_res.is_ok(), "UI message must report warning/partial success, not Err");
 }
+
+// =========================================================================
+// WINDOWS CONCURRENT TEARDOWN & RECLAMATION REGRESSION SUITE
+// =========================================================================
+
+#[cfg(windows)]
+#[test]
+fn test_windows_teardown_concurrency_cleaner_wins() {
+    let (ws, _guard) = create_test_workspace("win_cleaner_wins");
+    let stage_dir = ws.join(".ombracrypt_stage_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    let payload_dir = stage_dir.join("payload");
+    let sentinel_path = stage_dir.join(".active.lock");
+
+    fs::create_dir_all(&payload_dir).unwrap();
+    fs::write(payload_dir.join("payload.txt"), b"DATA").unwrap();
+
+    let sentinel_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(&sentinel_path)
+        .unwrap();
+    sentinel_file.try_lock_exclusive().unwrap();
+
+    let mut guard = TempDirGuard::with_sentinel(stage_dir.clone(), sentinel_file);
+
+    // Simulate publication: payload directory committed/unlinked
+    fs::remove_dir_all(&payload_dir).unwrap();
+
+    let barrier_lock_dropped = Arc::new(Barrier::new(2));
+    let barrier_cleaner_done = Arc::new(Barrier::new(2));
+
+    let stage_dir_for_cleaner = stage_dir.clone();
+    let b1 = barrier_lock_dropped.clone();
+    let b2 = barrier_cleaner_done.clone();
+
+    // Spawn cleaner thread
+    let cleaner_handle = thread::spawn(move || {
+        b1.wait(); // Phase 1: Wait for extractor to drop lock
+        let report = crate::fs_guard::clean_scoped_staging_dir_report(stage_dir_for_cleaner.parent().unwrap())
+            .expect("Cleaner sweep must succeed");
+        b2.wait(); // Phase 2: Signal extractor that cleaner completed sweep
+        report
+    });
+
+    // Extractor teardown: drops lock, waits for cleaner to delete, then calls windows teardown
+    let teardown_res = guard.cleanup_fallible_with(|wrapper, sentinel, lock| {
+        drop(lock); // 1. Extractor drops coordination lock
+        barrier_lock_dropped.wait(); // 2. Cleaner sweeps and deletes wrapper
+        barrier_cleaner_done.wait(); // 3. Cleaner has completed sweep
+
+        // 4. Extractor attempts deletion on already-removed paths (must resolve idempotently on NotFound)
+        crate::fs_guard::windows::teardown_staging_dir(wrapper, sentinel, None)
+    });
+
+    assert!(teardown_res.is_ok(), "Extractor teardown must resolve cleanly on already-removed wrapper: {:?}", teardown_res);
+    let cleaner_report = cleaner_handle.join().unwrap();
+    assert_eq!(cleaner_report.removed_count, 1, "Cleaner must successfully remove the abandoned wrapper");
+    assert_eq!(cleaner_report.failed_count, 0, "Cleaner must report zero failures");
+    assert!(!stage_dir.exists(), "Staging wrapper directory must not exist on disk");
+}
+
+#[cfg(windows)]
+#[test]
+fn test_windows_teardown_concurrency_extractor_wins() {
+    let (ws, _guard) = create_test_workspace("win_extractor_wins");
+    let stage_dir = ws.join(".ombracrypt_stage_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    let sentinel_path = stage_dir.join(".active.lock");
+
+    fs::create_dir_all(&stage_dir).unwrap();
+
+    let sentinel_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(&sentinel_path)
+        .unwrap();
+    sentinel_file.try_lock_exclusive().unwrap();
+
+    let barrier_lock_dropped = Arc::new(Barrier::new(2));
+    let barrier_extractor_done = Arc::new(Barrier::new(2));
+
+    let stage_dir_clone = stage_dir.clone();
+    let sentinel_path_clone = sentinel_path.clone();
+    let b1 = barrier_lock_dropped.clone();
+    let b2 = barrier_extractor_done.clone();
+
+    // Spawn cleaner thread with test hook pausing execution after lock drop but before pathname deletion
+    let cleaner_handle = thread::spawn(move || {
+        let mut report = crate::fs_guard::CleanupReport::default();
+        crate::fs_guard::windows::clean_staged_dir_for_test(
+            &stage_dir_clone,
+            &sentinel_path_clone,
+            sentinel_file,
+            1024,
+            &mut report,
+            || {
+                b1.wait(); // Signal extractor that cleaner dropped its lock handle
+                b2.wait(); // Wait for extractor to unlink sentinel and wrapper directory
+            },
+        );
+        report
+    });
+
+    // Extractor execution
+    barrier_lock_dropped.wait(); // Wait for cleaner to drop lock
+    let teardown_res = crate::fs_guard::windows::teardown_staging_dir(&stage_dir, &sentinel_path, None);
+    assert!(teardown_res.is_ok(), "Extractor teardown must succeed in unlinking: {:?}", teardown_res);
+    barrier_extractor_done.wait(); // Signal cleaner to resume deletion attempts
+
+    let cleaner_report = cleaner_handle.join().unwrap();
+    assert_eq!(cleaner_report.failed_count, 0, "Cleaner must report 0 failures when extractor removes wrapper first");
+    assert_eq!(cleaner_report.removed_count, 0, "Cleaner must not double-count deletion performed by extractor");
+    assert_eq!(cleaner_report.freed_bytes, 0, "Cleaner must not double-count freed bytes performed by extractor");
+    assert!(!stage_dir.exists(), "Staging wrapper directory must not exist on disk");
+}
