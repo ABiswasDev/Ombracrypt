@@ -113,7 +113,7 @@ pub fn rename_noreplace(src: &Path, dst: &Path, simulate_unsupported: bool) -> R
                 Err(format!(
                     "Atomic publication failed: Target filesystem returned EINVAL (os error 22). \
                     The underlying filesystem or mount configuration does not support RENAME_NOREPLACE flags, \
-                    or the kernel rejected the operation due to invalid argument flags on the target mount. \
+                    or the kernel rejected the requested operation. \
                     This frequently occurs on FUSE mounts (such as ntfs-3g) or eCryptfs encrypted directories. \
                     Please choose an extraction destination on a native Linux filesystem (e.g., ext4, btrfs) \
                     or remount NTFS volumes using the in-kernel 'ntfs3' driver. Existing files were not overwritten."
@@ -129,16 +129,20 @@ pub fn rename_noreplace(src: &Path, dst: &Path, simulate_unsupported: bool) -> R
     Ok(())
 }
 
-/// POSIX teardown: Unlinks the sentinel while open, deletes the wrapper directory, then drops the lock.
+/// POSIX teardown: Unlinks the sentinel with explicit error classification, deletes wrapper, then drops lock.
 pub fn teardown_staging_dir(
     wrapper_dir: &Path,
     sentinel_path: &Path,
     sentinel_lock: Option<File>,
 ) -> Result<(), (PathBuf, std::io::Error)> {
-    if sentinel_path.symlink_metadata().is_ok() {
-        if let Err(e) = fs::remove_file(sentinel_path) {
-            return Err((sentinel_path.to_path_buf(), e));
+    match fs::symlink_metadata(sentinel_path) {
+        Ok(_) => {
+            if let Err(e) = fs::remove_file(sentinel_path) {
+                return Err((sentinel_path.to_path_buf(), e));
+            }
         }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err((sentinel_path.to_path_buf(), e)),
     }
     drop(sentinel_lock);
 

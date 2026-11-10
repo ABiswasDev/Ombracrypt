@@ -1,36 +1,28 @@
-use std::fs::{self, File, OpenOptions};
+use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use super::CleanupReport;
 
-pub fn create_private_staging_file(path: &Path) -> Result<File, String> {
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|e| format!("Failed to create private key staging file: {}", e))
+/// Refuses to stage private files on unsupported platforms lacking verified 0600 file modes.
+pub fn create_private_staging_file(_path: &Path) -> Result<File, String> {
+    Err("Target platform does not support secure private staging file creation with mandatory 0600 permissions and exclusive locking".to_string())
 }
 
+/// Fails closed: refuses to construct staging directories on unsupported platforms lacking kernel-enforced locking and atomic isolation.
 pub fn create_secure_staging_dir(
-    wrapper_dir: &Path,
-    payload_dir: &Path,
-    sentinel_path: &Path,
+    _wrapper_dir: &Path,
+    _payload_dir: &Path,
+    _sentinel_path: &Path,
 ) -> Result<File, String> {
-    fs::create_dir(wrapper_dir).map_err(|e| e.to_string())?;
-    let sentinel = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .open(sentinel_path)
-        .map_err(|e| e.to_string())?;
-    fs::create_dir(payload_dir).map_err(|e| e.to_string())?;
-    Ok(sentinel)
+    Err("Target platform does not support secure staging directory isolation and atomic lock guarantees".to_string())
 }
 
-pub fn verify_locked_sentinel(_sentinel_file: &File, sentinel_path: &Path) -> bool {
-    fs::symlink_metadata(sentinel_path).is_ok()
+/// Always returns false on unsupported platforms to prevent unauthorized operations on unvalidated handles.
+pub fn verify_locked_sentinel(_sentinel_file: &File, _sentinel_path: &Path) -> bool {
+    false
 }
 
+/// Fails closed: unsupported platforms do not guarantee atomic non-overwriting publication.
 pub fn rename_noreplace(_src: &Path, dst: &Path, _simulate_unsupported: bool) -> Result<(), String> {
     Err(format!(
         "Target platform does not support atomic no-replace publication: {}",
@@ -38,42 +30,53 @@ pub fn rename_noreplace(_src: &Path, dst: &Path, _simulate_unsupported: bool) ->
     ))
 }
 
+/// Rejects out-of-band teardown on unsupported platforms without verified file ownership.
 pub fn teardown_staging_dir(
     wrapper_dir: &Path,
     _sentinel_path: &Path,
     sentinel_lock: Option<File>,
 ) -> Result<(), (PathBuf, std::io::Error)> {
     drop(sentinel_lock);
-    fs::remove_dir_all(wrapper_dir).map_err(|e| (wrapper_dir.to_path_buf(), e))
+    Err((
+        wrapper_dir.to_path_buf(),
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Staging directory teardown is unsupported on this platform",
+        ),
+    ))
 }
 
+/// Records a failed cleanup artifact rather than silently attempting unvalidated directory sweeps.
 pub fn clean_staged_dir(
     path: &Path,
     _sentinel_path: &Path,
     sentinel_file: File,
-    dir_bytes: u64,
+    _dir_bytes: u64,
     report: &mut CleanupReport,
 ) {
     drop(sentinel_file);
-    if fs::remove_dir_all(path).is_ok() {
-        report.removed_count += 1;
-        report.freed_bytes = report.freed_bytes.saturating_add(dir_bytes);
-    } else {
-        report.failed_count += 1;
+    report.failed_count += 1;
+    if report.failed_artifacts.len() < 10 {
+        report.failed_artifacts.push((
+            path.to_path_buf(),
+            "Staging directory cleanup is unsupported on this platform".to_string(),
+        ));
     }
 }
 
+/// Records a failed cleanup artifact rather than silently attempting unvalidated file deletion.
 pub fn clean_staged_file(
     path: &Path,
     file: File,
-    file_len: u64,
+    _file_len: u64,
     report: &mut CleanupReport,
 ) {
     drop(file);
-    if fs::remove_file(path).is_ok() {
-        report.removed_count += 1;
-        report.freed_bytes = report.freed_bytes.saturating_add(file_len);
-    } else {
-        report.failed_count += 1;
+    report.failed_count += 1;
+    if report.failed_artifacts.len() < 10 {
+        report.failed_artifacts.push((
+            path.to_path_buf(),
+            "Staging file cleanup is unsupported on this platform".to_string(),
+        ));
     }
 }

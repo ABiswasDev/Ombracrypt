@@ -152,10 +152,14 @@ pub fn teardown_staging_dir(
 ) -> Result<(), (PathBuf, std::io::Error)> {
     drop(sentinel_lock);
 
-    if sentinel_path.symlink_metadata().is_ok() {
-        if let Err(e) = fs::remove_file(sentinel_path) {
-            return Err((sentinel_path.to_path_buf(), e));
+    match fs::symlink_metadata(sentinel_path) {
+        Ok(_) => {
+            if let Err(e) = fs::remove_file(sentinel_path) {
+                return Err((sentinel_path.to_path_buf(), e));
+            }
         }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err((sentinel_path.to_path_buf(), e)),
     }
 
     if let Err(e) = fs::remove_dir(wrapper_dir) {

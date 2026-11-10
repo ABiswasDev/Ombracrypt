@@ -564,16 +564,19 @@ pub fn decrypt_vault_core_internal(
     sync_parent_directory(&final_extract_dir);
     sync_parent_directory(out_dir_obj);
 
-    // Clean up outer wrapper (which now contains only .active.lock)
+    // Clean up outer wrapper (which now contains only .active.lock).
+    // During failure injection, drop the sentinel lock but leave the wrapper and sentinel intact on disk.
     let cleanup_res = if simulate_cleanup_failure {
-        let _ = dir_guard.cleanup_fallible();
-        Err((
-            stage_wrapper.clone(),
-            std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "Simulated post-publish wrapper cleanup failure for regression testing",
-            ),
-        ))
+        dir_guard.cleanup_fallible_with(|wrapper, _sentinel, lock| {
+            drop(lock);
+            Err((
+                wrapper.to_path_buf(),
+                std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "Injected post-publish wrapper teardown failure",
+                ),
+            ))
+        })
     } else {
         dir_guard.cleanup_fallible()
     };

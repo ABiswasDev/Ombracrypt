@@ -1781,9 +1781,20 @@ fn test_fs_guard_cleaner_preserves_staging_symlinks() {
     let fake_stage_symlink = ws.join(".ombracrypt_stage_77777777777777777777777777777777");
     std::os::unix::fs::symlink(&real_dir, &fake_stage_symlink).unwrap();
 
-    let (cleaned, freed) = clean_scoped_staging_dir(&ws).unwrap();
-    assert_eq!(cleaned, 0, "Symlinks must be rejected without traversal");
-    assert_eq!(freed, 0);
+    let report = crate::fs_guard::clean_scoped_staging_dir_report(&ws).unwrap();
+    assert_eq!(report.removed_count, 0, "Symlinks must never be traversed or deleted");
+    assert_eq!(report.failed_count, 2, "Staging-named symlinks must be tracked in failed_count");
+    assert!(
+        report.failed_artifacts.iter().any(|(p, r)| p == &fake_part_symlink && r.contains("untrusted symbolic-link")),
+        "Symlink part artifact must be reported as untrusted"
+    );
+    assert!(
+        report.failed_artifacts.iter().any(|(p, r)| p == &fake_stage_symlink && r.contains("untrusted symbolic-link")),
+        "Symlink stage artifact must be reported as untrusted"
+    );
+
+    let clean_res = crate::fs_guard::clean_scoped_staging_dir(&ws);
+    assert!(clean_res.is_err(), "clean_scoped_staging_dir must return Err on skipped untrusted symlinks");
 
     assert!(fake_part_symlink.exists());
     assert!(fake_stage_symlink.exists());
@@ -1815,6 +1826,8 @@ fn test_fs_guard_stale_open_sentinel_fd_race_rejected() {
     let (ws, _guard) = create_test_workspace("stale_fd_race");
     let stage_dir = ws.join(".ombracrypt_stage_88888888888888888888888888888888");
     fs::create_dir_all(&stage_dir).unwrap();
+    // In-flight payload ensures the directory is non-empty and must never be swept as a markerless empty wrapper
+    fs::write(stage_dir.join("payload.bin"), vec![0x88u8; 1024]).unwrap();
     let sentinel_path = stage_dir.join(".active.lock");
 
     // 1. Extractor creates and locks sentinel
@@ -1849,9 +1862,10 @@ fn test_fs_guard_stale_open_sentinel_fd_race_rejected() {
 
     // 6. Verify cleaner rejects the directory because post-lock validation detects unlinked sentinel
     let (cleaned, freed) = clean_scoped_staging_dir(&ws).unwrap();
-    assert_eq!(cleaned, 0, "Directory with unlinked sentinel must not be purged");
+    assert_eq!(cleaned, 0, "Directory with unlinked sentinel and payload must not be purged");
     assert_eq!(freed, 0);
     assert!(stage_dir.exists(), "Staging directory must remain intact");
+    assert!(stage_dir.join("payload.bin").exists(), "Payload must remain intact");
 
     drop(cleaner_stale_sentinel);
 }
@@ -2121,7 +2135,7 @@ fn test_sprint11_success_path_cleanup_warning_simulated() {
         msg
     );
 
-    // Verify the published files exist and are intact
+    // 1. Verify published files exist and are intact
     let published_file = extract_dir.join("src/document.txt");
     assert!(
         published_file.exists(),
@@ -2131,6 +2145,27 @@ fn test_sprint11_success_path_cleanup_warning_simulated() {
         fs::read(&published_file).unwrap(),
         secret_payload,
         "Extracted data must be intact and uncorrupted"
+    );
+
+    // 2. Verify that the physical staging wrapper and sentinel were left on disk
+    let leftover_wrappers: Vec<_> = fs::read_dir(&extract_dir)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".ombracrypt_stage_"))
+        .collect();
+    assert_eq!(leftover_wrappers.len(), 1, "Residual staging wrapper must physically exist on disk");
+    let leftover_wrapper_path = leftover_wrappers[0].path();
+    assert!(
+        leftover_wrapper_path.join(".active.lock").exists(),
+        "Valid .active.lock sentinel must remain intact in abandoned wrapper"
+    );
+
+    // 3. Verify that a subsequent cleaner sweep safely reclaims the abandoned wrapper
+    let (cleaned, _) = clean_scoped_staging_dir(&extract_dir).expect("Scoped cleaner must reclaim residual wrapper");
+    assert_eq!(cleaned, 1, "Cleaner must successfully reclaim abandoned wrapper");
+    assert!(
+        !leftover_wrapper_path.exists(),
+        "Residual wrapper must be unlinked after cleaner run"
     );
 }
 
@@ -2283,4 +2318,55 @@ fn test_sprint11_deterministic_multi_chunk_cancellation_and_staging_cleanup() {
         !stage_wrapper.exists(),
         "Staging wrapper must be completely unlinked"
     );
+}#[test]
+fn test_cleaner_root_validation_rejects_missing_file_and_symlink() {
+    let (ws, _guard) = create_test_workspace("root_validation");
+
+    // 1. Missing directory
+    let missing_path = ws.join("nonexistent_folder");
+    let res_missing = crate::fs_guard::clean_scoped_staging_dir_report(&missing_path);
+    assert!(res_missing.is_err());
+    assert!(res_missing.unwrap_err().contains("Directory not found"));
+
+    // 2. Regular file path passed as directory
+    let regular_file = ws.join("plain_file.txt");
+    fs::write(&regular_file, b"NOT_A_DIR").unwrap();
+    let res_file = crate::fs_guard::clean_scoped_staging_dir_report(&regular_file);
+    assert!(res_file.is_err());
+    assert!(res_file.unwrap_err().contains("Selected path is not a directory"));
+
+    // 3. Symlink root (POSIX only)
+    #[cfg(unix)]
+    {
+        let real_dir = ws.join("real_target_dir");
+        fs::create_dir_all(&real_dir).unwrap();
+        let symlink_dir = ws.join("symlink_dir_root");
+        std::os::unix::fs::symlink(&real_dir, &symlink_dir).unwrap();
+
+        let res_sym = crate::fs_guard::clean_scoped_staging_dir_report(&symlink_dir);
+        assert!(res_sym.is_err());
+        assert!(res_sym.unwrap_err().contains("Refusing to scan symbolic-link root"));
+    }
+}
+
+#[test]
+fn test_cleaner_reclaims_markerless_empty_staging_wrapper() {
+    let (ws, _guard) = create_test_workspace("markerless_recovery");
+
+    // 1. Create a markerless EMPTY staging wrapper (payload removed, sentinel deleted, parent removal failed)
+    let empty_stage = ws.join(".ombracrypt_stage_11112222333344445555666677778888");
+    fs::create_dir_all(&empty_stage).unwrap();
+
+    // 2. Create an unowned NON-EMPTY staging wrapper (no sentinel, but contains unknown files)
+    let non_empty_stage = ws.join(".ombracrypt_stage_99998888777766665555444433332222");
+    fs::create_dir_all(&non_empty_stage).unwrap();
+    fs::write(non_empty_stage.join("mystery.bin"), b"UNOWNED_DATA").unwrap();
+
+    let report = crate::fs_guard::clean_scoped_staging_dir_report(&ws).unwrap();
+    assert_eq!(report.removed_count, 1, "Markerless empty staging wrapper must be purged");
+    assert_eq!(report.unowned_skipped_count, 1, "Non-empty unowned wrapper must be skipped");
+    assert_eq!(report.failed_count, 0);
+
+    assert!(!empty_stage.exists(), "Empty wrapper must be gone");
+    assert!(non_empty_stage.exists(), "Non-empty unowned directory must be preserved");
 }

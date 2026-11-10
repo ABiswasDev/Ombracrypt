@@ -168,8 +168,33 @@ pub fn create_secure_staging_dir(
 }
 
 pub fn clean_scoped_staging_dir_report(dir: &Path) -> Result<CleanupReport, String> {
-    if !dir.exists() || !dir.is_dir() {
-        return Ok(CleanupReport::default());
+    match fs::symlink_metadata(dir) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err(format!(
+                "Security policy violation: Refusing to scan symbolic-link root: {}",
+                dir.display()
+            ));
+        }
+        Ok(meta) if !meta.is_dir() => {
+            return Err(format!(
+                "Invalid path: Selected path is not a directory: {}",
+                dir.display()
+            ));
+        }
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(format!(
+                "Directory not found: Selected path does not exist: {}",
+                dir.display()
+            ));
+        }
+        Err(e) => {
+            return Err(format!(
+                "Access error: Cannot inspect directory metadata for {}: {}",
+                dir.display(),
+                e
+            ));
+        }
     }
 
     let mut report = CleanupReport::default();
@@ -209,7 +234,18 @@ pub fn clean_scoped_staging_dir_report(dir: &Path) -> Result<CleanupReport, Stri
             }
         };
 
+        // Conservative deletion policy: never traverse or delete symlinks.
+        // Surface staging-named symlinks in failed_artifacts for auditability.
         if meta.file_type().is_symlink() {
+            if is_valid_staging_dir_name(&name_str) || is_valid_staging_file_name(&name_str) {
+                report.failed_count += 1;
+                if report.failed_artifacts.len() < 10 {
+                    report.failed_artifacts.push((
+                        path,
+                        "Skipped for safety: untrusted symbolic-link staging artifact".to_string(),
+                    ));
+                }
+            }
             continue;
         }
 
@@ -227,7 +263,31 @@ pub fn clean_scoped_staging_dir_report(dir: &Path) -> Result<CleanupReport, Stri
                     continue;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    report.unowned_skipped_count += 1;
+                    // Safe reclamation: if sentinel is absent, check whether the wrapper is strictly empty.
+                    let is_empty = match fs::read_dir(&path) {
+                        Ok(mut it) => it.next().is_none(),
+                        Err(_) => false,
+                    };
+
+                    if is_empty {
+                        // Non-recursive remove_dir fails at kernel boundary if any child exists.
+                        match fs::remove_dir(&path) {
+                            Ok(()) => {
+                                report.removed_count += 1;
+                            }
+                            Err(err) => {
+                                report.failed_count += 1;
+                                if report.failed_artifacts.len() < 10 {
+                                    report.failed_artifacts.push((
+                                        path.clone(),
+                                        format!("Failed to remove empty residual staging wrapper: {}", err),
+                                    ));
+                                }
+                            }
+                        }
+                    } else {
+                        report.unowned_skipped_count += 1;
+                    }
                     continue;
                 }
                 Err(e) => {
@@ -427,9 +487,16 @@ impl TempDirGuard {
         &self.path
     }
 
-    /// Explicit cleanup: Unconditionally disarms the guard so Drop never triggers
-    /// an out-of-band sweep without ownership lock validation.
+    /// Standard platform cleanup invoking OS-specific teardown.
     pub fn cleanup_fallible(&mut self) -> Result<(), (PathBuf, std::io::Error)> {
+        self.cleanup_fallible_with(platform::teardown_staging_dir)
+    }
+
+    /// Teardown with dependency-injected teardown function for deterministic failure testing.
+    pub fn cleanup_fallible_with<F>(&mut self, teardown_fn: F) -> Result<(), (PathBuf, std::io::Error)>
+    where
+        F: FnOnce(&Path, &Path, Option<File>) -> Result<(), (PathBuf, std::io::Error)>,
+    {
         self.armed = false;
         unregister_active_staging_path(&self.path);
 
@@ -453,7 +520,7 @@ impl TempDirGuard {
         }
 
         let sentinel_path = self.path.join(".active.lock");
-        platform::teardown_staging_dir(&self.path, &sentinel_path, self.sentinel_lock.take())
+        teardown_fn(&self.path, &sentinel_path, self.sentinel_lock.take())
     }
 
     pub fn release_sentinel(&mut self) -> Result<(), String> {
