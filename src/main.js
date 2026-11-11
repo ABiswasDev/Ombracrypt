@@ -7,14 +7,19 @@ const modeEncryptTab = document.getElementById("mode-encrypt-tab");
 const modeDecryptTab = document.getElementById("mode-decrypt-tab");
 
 // --- Path Selection Elements ---
+const sourceLocationLabel = document.getElementById("source-location-label");
 const selectSourceBtn = document.getElementById("select-source-btn");
 const targetDisplay = document.getElementById("target-path-display");
 
+const outputDestLabel = document.getElementById("output-dest-label");
 const selectOutputBtn = document.getElementById("select-output-btn");
 const outputDisplay = document.getElementById("output-path-display");
 
 const keyModeWrapper = document.getElementById("key-mode-wrapper");
 const keyModeSelect = document.getElementById("key-mode-select");
+const publicSealingBanner = document.getElementById("public-sealing-banner");
+const keyDestSubblock = document.getElementById("key-dest-subblock");
+const keyDestLabel = document.getElementById("key-dest-label");
 const selectKeyBtn = document.getElementById("select-key-btn");
 const keyDisplay = document.getElementById("key-path-display");
 
@@ -23,10 +28,12 @@ const spaceTelemetryText = document.getElementById("space-telemetry-text");
 
 // --- Settings & Action Elements ---
 const settingsGroup = document.getElementById("settings-group");
+const cipherAlgoSelect = document.getElementById("cipher-algo");
+const kemAlgoSelect = document.getElementById("kem-algo");
 const kemAlgoGroup = document.getElementById("kem-algo-group");
 const advancedOptions = document.getElementById("advanced-options");
 const actionBtn = document.getElementById("action-btn");
-const cancelCleanBtn = document.getElementById("cancel-clean-btn");
+const abortBtn = document.getElementById("abort-btn");
 
 // --- Password Validation Elements ---
 const mainPinInput = document.getElementById("main-pin");
@@ -42,12 +49,27 @@ const deceptionInput = document.getElementById("deception-passcode");
 const confirmDeceptionInput = document.getElementById("confirm-deception-passcode");
 const deceptionMatchMsg = document.getElementById("deception-match-msg");
 
-// --- Progress & ETA Elements ---
+// --- Progress & Phase Elements ---
 const progressContainer = document.getElementById("progress-container");
 const progressBar = document.getElementById("progress-bar");
 const progressPercent = document.getElementById("progress-percent");
 const progressEta = document.getElementById("progress-eta");
 const statusMsg = document.getElementById("status-msg");
+
+const phaseNode1 = document.getElementById("phase-node-1");
+const phaseNode2 = document.getElementById("phase-node-2");
+const phaseNode3 = document.getElementById("phase-node-3");
+const phaseLine1 = document.getElementById("phase-line-1");
+const phaseLine2 = document.getElementById("phase-line-2");
+
+// --- Staging Hygiene / Maintenance Modal Elements ---
+const openMaintenanceBtn = document.getElementById("open-maintenance-btn");
+const closeMaintenanceBtn = document.getElementById("close-maintenance-btn");
+const maintenanceModal = document.getElementById("maintenance-modal");
+const maintenanceDirsList = document.getElementById("maintenance-dirs-list");
+const executeMaintenanceBtn = document.getElementById("execute-maintenance-btn");
+const maintenanceReportBox = document.getElementById("maintenance-report-box");
+const maintenanceReportSummary = document.getElementById("maintenance-report-summary");
 
 // --- Application State ---
 let currentMode = "ENCRYPT"; // "ENCRYPT" or "DECRYPT"
@@ -57,25 +79,39 @@ let keyPath = null;
 let storageCheckPassed = false;
 let streamStartTime = 0;
 let isOperationRunning = false;
+const hideTimeouts = new Map();
 
 // --- Mode Switching Logic ---
 modeEncryptTab.addEventListener("click", () => switchMode("ENCRYPT"));
 modeDecryptTab.addEventListener("click", () => switchMode("DECRYPT"));
 
-function updateCancelCleanButtonUI() {
-  if (!cancelCleanBtn) return;
+function setFormControlsDisabled(disabled) {
+  selectSourceBtn.disabled = disabled;
+  selectOutputBtn.disabled = disabled;
+  selectKeyBtn.disabled = disabled;
+  keyModeSelect.disabled = disabled;
+  cipherAlgoSelect.disabled = disabled;
+  kemAlgoSelect.disabled = disabled;
+  mainPinInput.disabled = disabled;
+  confirmPinInput.disabled = disabled;
+  deceptionInput.disabled = disabled;
+  confirmDeceptionInput.disabled = disabled;
+  modeEncryptTab.disabled = disabled;
+  modeDecryptTab.disabled = disabled;
+  openMaintenanceBtn.disabled = disabled;
+  document.querySelectorAll(".eye-toggle-btn").forEach((btn) => (btn.disabled = disabled));
+}
+
+function updateExecutionUI() {
   if (isOperationRunning) {
-    cancelCleanBtn.style.display = "block";
-    cancelCleanBtn.textContent = "Cancel Operation & Clean";
-    cancelCleanBtn.className = "cancel-clean-btn cancel-active";
-    cancelCleanBtn.disabled = false;
-  } else if (outputDir || keyPath) {
-    cancelCleanBtn.style.display = "block";
-    cancelCleanBtn.textContent = "Clean Temporary Staging in Selected Folder";
-    cancelCleanBtn.className = "cancel-clean-btn idle-clean";
-    cancelCleanBtn.disabled = false;
+    actionBtn.disabled = true;
+    abortBtn.style.display = "block";
+    abortBtn.disabled = false;
+    setFormControlsDisabled(true);
   } else {
-    cancelCleanBtn.style.display = "none";
+    actionBtn.disabled = false;
+    abortBtn.style.display = "none";
+    setFormControlsDisabled(false);
   }
 }
 
@@ -93,21 +129,25 @@ function switchMode(newMode) {
   keyDisplay.textContent = "No key location selected";
   spaceTelemetryBox.style.display = "none";
   statusMsg.textContent = "";
-  actionBtn.disabled = false;
 
+  resetProgressPhases();
   progressContainer.style.display = "none";
   progressBar.style.width = "0%";
   if (progressPercent) progressPercent.textContent = "0%";
   if (progressEta) progressEta.textContent = "";
 
-  updateCancelCleanButtonUI();
+  updateExecutionUI();
 
   if (currentMode === "ENCRYPT") {
     modeEncryptTab.classList.add("active-tab");
     modeDecryptTab.classList.remove("active-tab");
 
-    selectSourceBtn.textContent = "1. Select Input Folder to Encrypt";
-    selectOutputBtn.textContent = "2. Select Vault Output Folder";
+    if (sourceLocationLabel) sourceLocationLabel.textContent = "SOURCE LOCATION";
+    selectSourceBtn.querySelector(".btn-text").textContent = "Select Input Folder to Encrypt";
+
+    if (outputDestLabel) outputDestLabel.textContent = "VAULT DESTINATION (.OBV)";
+    selectOutputBtn.querySelector(".btn-text").textContent = "Select Vault Output Folder";
+
     keyModeWrapper.style.display = "flex";
     updateKeyModeUI();
 
@@ -115,16 +155,23 @@ function switchMode(newMode) {
     confirmGroup.style.display = "flex";
     confirmPinInput.required = true;
     actionBtn.textContent = "Lock Vault";
-    actionBtn.style.background = "linear-gradient(135deg, #0284c7 0%, #38bdf8 100%)";
-    actionBtn.style.color = "#04101e";
+    actionBtn.style.background = "linear-gradient(135deg, #0284c7 0%, #00f0ff 100%)";
+    actionBtn.style.color = "#020817";
   } else {
     modeDecryptTab.classList.add("active-tab");
     modeEncryptTab.classList.remove("active-tab");
 
-    selectSourceBtn.textContent = "1. Select Vault File (.obv)";
-    selectOutputBtn.textContent = "2. Select Extraction Output Folder";
+    if (sourceLocationLabel) sourceLocationLabel.textContent = "ENCRYPTED VAULT FILE";
+    selectSourceBtn.querySelector(".btn-text").textContent = "Select Vault File (.obv)";
+
+    if (outputDestLabel) outputDestLabel.textContent = "EXTRACTION DESTINATION FOLDER";
+    selectOutputBtn.querySelector(".btn-text").textContent = "Select Extraction Output Folder";
+
     keyModeWrapper.style.display = "none";
-    selectKeyBtn.textContent = "3. Select Private Key File (.obk)";
+    publicSealingBanner.style.display = "none";
+    keyDestSubblock.style.display = "block";
+    keyDestLabel.textContent = "PRIVATE KEY LOCATION (.OBK)";
+    selectKeyBtn.querySelector(".btn-text").textContent = "Select Private Key (.obk)";
 
     settingsGroup.style.display = "none";
     advancedOptions.style.display = "none";
@@ -135,32 +182,35 @@ function switchMode(newMode) {
 
     actionBtn.textContent = "Unlock Vault";
     actionBtn.style.background = "linear-gradient(135deg, #059669 0%, #34d399 100%)";
-    actionBtn.style.color = "#04101e";
+    actionBtn.style.color = "#020817";
   }
 }
 
-// --- Key Handling Mode Switcher (New Keypair vs Existing .obp) ---
+// --- Key Handling Mode Switcher ---
 keyModeSelect.addEventListener("change", () => {
   keyPath = null;
   keyDisplay.textContent = "No key location selected";
   updateKeyModeUI();
-  updateCancelCleanButtonUI();
   runPreFlightSpaceCheck();
 });
 
 function updateKeyModeUI() {
   if (keyModeSelect.value === "existing_obp") {
-    selectKeyBtn.textContent = "3. Select Public Sealing Key (.obp)";
+    publicSealingBanner.style.display = "flex";
+    keyDestLabel.textContent = "PUBLIC SEALING KEY (.OBP)";
+    selectKeyBtn.querySelector(".btn-text").textContent = "Select Public Key (.obp)";
     kemAlgoGroup.style.display = "none";
     advancedOptions.style.display = "none";
   } else {
-    selectKeyBtn.textContent = "3. Select Folder to Save Keys (.obk / .obp)";
+    publicSealingBanner.style.display = "none";
+    keyDestLabel.textContent = "KEY DESTINATION (.OBK / .OBP)";
+    selectKeyBtn.querySelector(".btn-text").textContent = "Select Folder to Save Keys (.obk / .obp)";
     kemAlgoGroup.style.display = "flex";
     advancedOptions.style.display = "block";
   }
 }
 
-// --- Path Selector Button Handlers ---
+// --- Path Selector Handlers ---
 selectSourceBtn.addEventListener("click", async () => {
   if (isOperationRunning) return;
   if (currentMode === "ENCRYPT") {
@@ -202,7 +252,6 @@ selectOutputBtn.addEventListener("click", async () => {
   if (selected) {
     outputDir = selected;
     outputDisplay.textContent = outputDir;
-    updateCancelCleanButtonUI();
     await runPreFlightSpaceCheck();
   }
 });
@@ -218,7 +267,6 @@ selectKeyBtn.addEventListener("click", async () => {
     if (selected) {
       keyPath = selected;
       keyDisplay.textContent = keyPath;
-      updateCancelCleanButtonUI();
       await runPreFlightSpaceCheck();
     }
   } else if (currentMode === "ENCRYPT" && keyModeSelect.value === "existing_obp") {
@@ -231,7 +279,6 @@ selectKeyBtn.addEventListener("click", async () => {
     if (selected) {
       keyPath = selected;
       keyDisplay.textContent = keyPath;
-      updateCancelCleanButtonUI();
       await runPreFlightSpaceCheck();
     }
   } else {
@@ -244,13 +291,24 @@ selectKeyBtn.addEventListener("click", async () => {
     if (selected) {
       keyPath = selected;
       keyDisplay.textContent = keyPath;
-      updateCancelCleanButtonUI();
       await runPreFlightSpaceCheck();
     }
   }
 });
 
-// --- Instant Pre-Flight Disk Space & Collision Check ---
+// Click-to-copy helper for path readouts
+[targetDisplay, outputDisplay, keyDisplay].forEach((display) => {
+  display.addEventListener("click", () => {
+    if (display.textContent && !display.textContent.startsWith("No ")) {
+      navigator.clipboard.writeText(display.textContent);
+      const original = display.textContent;
+      display.textContent = "Copied to clipboard!";
+      setTimeout(() => (display.textContent = original), 1400);
+    }
+  });
+});
+
+// --- Pre-Flight Disk Space & Collision Check ---
 async function runPreFlightSpaceCheck() {
   if (!targetPath || !outputDir) {
     spaceTelemetryBox.style.display = "none";
@@ -297,48 +355,119 @@ async function runPreFlightSpaceCheck() {
   }
 }
 
-// --- Cancel & Scoped Clean Button Handler ---
-cancelCleanBtn.addEventListener("click", async () => {
-  if (isOperationRunning) {
-    try {
-      statusMsg.textContent = "Canceling operation and purging staging artifacts...";
-      statusMsg.style.color = "#f87171";
-      cancelCleanBtn.disabled = true;
-      await invoke("cancel_current_operation");
-    } catch (err) {
-      statusMsg.textContent = "Cancellation error: " + err;
-      statusMsg.style.color = "#f87171";
-    }
-  } else {
-    const targetDirs = [];
-    if (outputDir) targetDirs.push(outputDir);
-    if (keyPath) {
-      const pathStr = keyPath.toString();
-      if (pathStr.endsWith(".obk") || pathStr.endsWith(".obp")) {
-        const lastSlash = Math.max(pathStr.lastIndexOf('/'), pathStr.lastIndexOf('\\'));
-        if (lastSlash > 0) targetDirs.push(pathStr.substring(0, lastSlash));
-      } else {
-        targetDirs.push(keyPath);
-      }
-    }
-
-    if (targetDirs.length === 0) return;
-
-    try {
-      statusMsg.textContent = "Scanning selected folders for abandoned staging files...";
-      statusMsg.style.color = "var(--text-secondary)";
-      const res = await invoke("clean_staging_artifacts", { paths: targetDirs });
-      statusMsg.textContent = res;
-      statusMsg.style.color = "#38bdf8";
-      await runPreFlightSpaceCheck();
-    } catch (err) {
-      statusMsg.textContent = "Cleaner error: " + err;
-      statusMsg.style.color = "#f87171";
-    }
+// --- Abort Active Operation Button ---
+abortBtn.addEventListener("click", async () => {
+  if (!isOperationRunning) return;
+  try {
+    statusMsg.textContent = "Canceling operation and purging staging artifacts...";
+    statusMsg.style.color = "#f87171";
+    abortBtn.disabled = true;
+    await invoke("cancel_current_operation");
+  } catch (err) {
+    statusMsg.textContent = "Cancellation error: " + err;
+    statusMsg.style.color = "#f87171";
   }
 });
 
-// --- Real-time Password Validation Logic ---
+// --- Staging Hygiene / Maintenance Modal Handlers ---
+openMaintenanceBtn.addEventListener("click", () => {
+  if (isOperationRunning) return;
+  const dirs = getActiveTargetDirs();
+  maintenanceDirsList.innerHTML = "";
+  if (dirs.length === 0) {
+    maintenanceDirsList.innerHTML = "<li>No active workspace folders selected yet.</li>";
+    executeMaintenanceBtn.disabled = true;
+  } else {
+    dirs.forEach((d) => {
+      const li = document.createElement("li");
+      li.textContent = d;
+      maintenanceDirsList.appendChild(li);
+    });
+    executeMaintenanceBtn.disabled = false;
+  }
+  maintenanceReportBox.style.display = "none";
+  maintenanceModal.style.display = "flex";
+});
+
+closeMaintenanceBtn.addEventListener("click", () => {
+  maintenanceModal.style.display = "none";
+});
+
+window.addEventListener("click", (e) => {
+  if (e.target === maintenanceModal) {
+    maintenanceModal.style.display = "none";
+  }
+});
+
+function getActiveTargetDirs() {
+  const targetDirs = [];
+  if (outputDir) targetDirs.push(outputDir);
+  if (keyPath) {
+    const pathStr = keyPath.toString();
+    if (pathStr.endsWith(".obk") || pathStr.endsWith(".obp")) {
+      const lastSlash = Math.max(pathStr.lastIndexOf("/"), pathStr.lastIndexOf("\\"));
+      if (lastSlash > 0) targetDirs.push(pathStr.substring(0, lastSlash));
+    } else {
+      targetDirs.push(keyPath);
+    }
+  }
+  return [...new Set(targetDirs)];
+}
+
+executeMaintenanceBtn.addEventListener("click", async () => {
+  const dirs = getActiveTargetDirs();
+  if (dirs.length === 0) return;
+
+  executeMaintenanceBtn.disabled = true;
+  executeMaintenanceBtn.textContent = "Scanning...";
+  try {
+    const res = await invoke("clean_staging_artifacts", { paths: dirs });
+    maintenanceReportBox.style.display = "block";
+    maintenanceReportSummary.textContent = res;
+    await runPreFlightSpaceCheck();
+  } catch (err) {
+    maintenanceReportBox.style.display = "block";
+    maintenanceReportSummary.textContent = "Cleanup Notice: " + err;
+  } finally {
+    executeMaintenanceBtn.disabled = false;
+    executeMaintenanceBtn.textContent = "Run Cleanup Sweep";
+  }
+});
+
+// --- Password Visibility Toggles with 8s Auto-Mask ---
+document.querySelectorAll(".eye-toggle-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const targetId = btn.getAttribute("data-target");
+    const input = document.getElementById(targetId);
+    if (!input || input.disabled) return;
+
+    if (input.type === "password") {
+      input.type = "text";
+      btn.innerHTML = "&#128064;";
+
+      if (hideTimeouts.has(targetId)) {
+        clearTimeout(hideTimeouts.get(targetId));
+      }
+
+      const timeoutId = setTimeout(() => {
+        input.type = "password";
+        btn.innerHTML = "&#128065;";
+        hideTimeouts.delete(targetId);
+      }, 8000);
+
+      hideTimeouts.set(targetId, timeoutId);
+    } else {
+      input.type = "password";
+      btn.innerHTML = "&#128065;";
+      if (hideTimeouts.has(targetId)) {
+        clearTimeout(hideTimeouts.get(targetId));
+        hideTimeouts.delete(targetId);
+      }
+    }
+  });
+});
+
+// --- Real-time Password Strength & Match Validation ---
 mainPinInput.addEventListener("input", () => {
   if (currentMode === "ENCRYPT") {
     checkPasswordStrength(mainPinInput.value);
@@ -382,9 +511,9 @@ function checkPasswordStrength(password) {
     strengthText.style.color = "#fbbf24";
   } else {
     strengthBar.style.width = "100%";
-    strengthBar.style.backgroundColor = "#38bdf8";
+    strengthBar.style.backgroundColor = "#00f0ff";
     strengthText.textContent = "Strength: Spectral Shield (Strong)";
-    strengthText.style.color = "#7dd3fc";
+    strengthText.style.color = "#38bdf8";
   }
 }
 
@@ -439,7 +568,15 @@ function checkDeceptionValidation() {
 deceptionInput.addEventListener("input", checkDeceptionValidation);
 confirmDeceptionInput.addEventListener("input", checkDeceptionValidation);
 
-// --- Bridge to Rust Backend & Progress Reporting ---
+// --- Phased Progress & Telemetry Tracking ---
+function resetProgressPhases() {
+  phaseNode1.className = "phase-node active";
+  phaseNode2.className = "phase-node";
+  phaseNode3.className = "phase-node";
+  phaseLine1.className = "phase-line";
+  phaseLine2.className = "phase-line";
+}
+
 listen("crypto-progress", (event) => {
   const currentProgress = event.payload;
 
@@ -450,13 +587,16 @@ listen("crypto-progress", (event) => {
   const streamStartThreshold = currentMode === "ENCRYPT" ? 30 : 40;
 
   if (currentProgress < streamStartThreshold) {
-    if (progressEta) progressEta.textContent = "Deriving Argon2id & ML-KEM keys...";
-  } else if (currentProgress === streamStartThreshold) {
-    streamStartTime = Date.now();
-    if (progressEta) progressEta.textContent = "Streaming in-memory chunks...";
-  } else if (currentProgress >= 100) {
-    if (progressEta) progressEta.textContent = "Completed!";
-  } else {
+    phaseNode1.className = "phase-node active";
+    phaseLine1.className = "phase-line";
+    phaseNode2.className = "phase-node";
+    if (progressEta) progressEta.textContent = "Phase 1: Synthesizing keys & KEM encapsulation...";
+  } else if (currentProgress >= streamStartThreshold && currentProgress < 98) {
+    if (streamStartTime === 0) streamStartTime = Date.now();
+    phaseNode1.className = "phase-node complete";
+    phaseLine1.className = "phase-line active";
+    phaseNode2.className = "phase-node active";
+
     const elapsedMs = Math.max(1, Date.now() - streamStartTime);
     const phaseProgress = Math.max(1, currentProgress - streamStartThreshold);
     const msPerPercent = elapsedMs / phaseProgress;
@@ -467,7 +607,15 @@ listen("crypto-progress", (event) => {
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = (totalSeconds % 60).toString().padStart(2, "0");
 
-    if (progressEta) progressEta.textContent = `ETA: ${minutes}m ${seconds}s remaining`;
+    if (progressEta) progressEta.textContent = `Phase 2: Streaming AEAD (~${minutes}m ${seconds}s left)`;
+  } else if (currentProgress >= 98 && currentProgress < 100) {
+    phaseNode2.className = "phase-node complete";
+    phaseLine2.className = "phase-line active";
+    phaseNode3.className = "phase-node active";
+    if (progressEta) progressEta.textContent = "Phase 3: Verifying tags & committing atomic promotion...";
+  } else {
+    phaseNode3.className = "phase-node complete";
+    if (progressEta) progressEta.textContent = "Completed!";
   }
 });
 
@@ -516,23 +664,23 @@ cryptoForm.addEventListener("submit", async (e) => {
     }
   }
 
-  const cipher = document.getElementById("cipher-algo").value;
-  const kem = document.getElementById("kem-algo").value;
+  const cipher = cipherAlgoSelect.value;
+  const kem = kemAlgoSelect.value;
   const useExistingPublicKey =
     currentMode === "ENCRYPT" && keyModeSelect.value === "existing_obp";
 
   isOperationRunning = true;
-  actionBtn.disabled = true;
-  updateCancelCleanButtonUI();
+  streamStartTime = 0;
+  updateExecutionUI();
+  resetProgressPhases();
 
   progressContainer.style.display = "block";
   progressBar.style.width = "0%";
   if (progressPercent) progressPercent.textContent = "0%";
-  if (progressEta) progressEta.textContent = "Initializing pipeline...";
+  if (progressEta) progressEta.textContent = "Phase 1: Initializing pipeline...";
 
-  statusMsg.textContent =
-    "Executing in-memory cryptographic streaming. Do not close the application.";
-  statusMsg.style.color = "var(--accent)";
+  statusMsg.textContent = "Executing in-memory cryptographic streaming. Do not close the application.";
+  statusMsg.style.color = "var(--patronus-cyan)";
 
   try {
     const response = await invoke("process_cryptography", {
@@ -555,8 +703,7 @@ cryptoForm.addEventListener("submit", async (e) => {
     progressContainer.style.display = "none";
   } finally {
     isOperationRunning = false;
-    actionBtn.disabled = false;
-    updateCancelCleanButtonUI();
+    updateExecutionUI();
 
     mainPinInput.value = "";
     confirmPinInput.value = "";

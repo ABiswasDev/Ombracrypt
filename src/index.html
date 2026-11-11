@@ -10,132 +10,276 @@
 </head>
 
 <body>
+  <div class="patronus-ambient-bloom"></div>
+
   <main class="container">
-    <!-- Ombracrux-Style Tracked Header -->
-    <header class="header">
-      <h1 class="glow-title">O M B R A C R Y P T</h1>
-      <p class="subtitle">ZERO-TRUST QUANTUM-SAFE VAULT <span class="version-dot">&bull;</span> <span class="version-tag">v2.0.0</span></p>
-      
-      <!-- Signature Diamond Hairline Divider -->
-      <div class="header-divider">
-        <span class="divider-line"></span>
-        <span class="divider-diamond">&#9671;</span>
-        <span class="divider-line"></span>
-      </div>
-    </header>
-
-    <!-- Centered Segmented Capsule Switcher -->
-    <div class="mode-tabs-wrapper">
-      <div class="mode-tabs">
-        <button type="button" id="mode-encrypt-tab" class="tab-btn active-tab">Encrypt Mode</button>
-        <button type="button" id="mode-decrypt-tab" class="tab-btn">Decrypt Mode</button>
-      </div>
-    </div>
-
-    <!-- Path & Storage Configuration Panel -->
-    <div class="file-selection">
-      <div class="path-block">
-        <button type="button" id="select-source-btn" class="secondary-btn">1. Select Input Folder to Encrypt</button>
-        <p id="target-path-display" class="path-label">No source selected</p>
-      </div>
-
-      <div class="path-block divider-top">
-        <button type="button" id="select-output-btn" class="secondary-btn">2. Select Vault Output Folder</button>
-        <p id="output-path-display" class="path-label">No output destination selected</p>
-      </div>
-
-      <div class="path-block divider-top">
-        <div id="key-mode-wrapper" class="input-group" style="margin-bottom: 8px; text-align: left;">
-          <label for="key-mode-select" class="neon-green-text">KEY HANDLING MODE</label>
-          <select id="key-mode-select">
-            <option value="generate">Generate Keys & Encrypt Vault (.obk + .obp)</option>
-            <option value="existing_obp">Seal with Existing Public Key (.obp)</option>
-          </select>
-        </div>
-
-        <button type="button" id="select-key-btn" class="secondary-btn key-btn-accent">
-          3. Select Folder to Save Keys (.obk / .obp)
-        </button>
-        <p id="key-path-display" class="path-label">No key location selected</p>
-      </div>
-
-      <!-- Live Disk Space & Collision Telemetry Badge -->
-      <div id="space-telemetry-box" class="telemetry-box" style="display: none;">
-        <span id="space-telemetry-text">Checking storage...</span>
-      </div>
-    </div>
-
-    <!-- Encryption Algorithm Options (Side-by-Side Grid) -->
-    <div class="settings-group" id="settings-group">
-      <div class="input-group">
-        <label for="cipher-algo" class="neon-green-text">CIPHER ALGORITHM</label>
-        <select id="cipher-algo">
-          <option value="xchacha20">XChaCha20-Poly1305</option>
-          <option value="aes256gcm">AES-256-GCM</option>
-        </select>
-      </div>
-
-      <div class="input-group" id="kem-algo-group">
-        <label for="kem-algo" class="neon-green-text">KEM ALGORITHM</label>
-        <select id="kem-algo">
-          <option value="xwing">X-Wing (ML-KEM-768)</option>
-          <option value="cypherpunk">Cypherpunk (ML-KEM-1024)</option>
-        </select>
-      </div>
-    </div>
-
-    <!-- Authentication -->
     <form id="crypto-form">
-      <div class="password-grid">
-        <!-- Master Password -->
-        <div class="input-group">
-          <input id="main-pin" type="password" placeholder="Master Password" required />
-          <div id="password-strength-container" style="display: none; height: 3px; background: #1c324f; border-radius: 2px; margin-top: 3px;">
-            <div id="password-strength-bar" style="height: 100%; width: 0%; border-radius: 2px; transition: width 0.3s ease, background-color 0.3s ease;"></div>
+      <!-- Top Navigation Header -->
+      <header class="app-header">
+        <div class="brand-group">
+          <div class="brand-title-row">
+            <h1 class="brand-logo">O M B R A C R Y P T</h1>
           </div>
-          <small id="password-strength-text" style="display: none; font-weight: 600;"></small>
+          <p class="brand-subtitle">
+            POST-QUANTUM HYBRID VAULT <span class="version-dot">&bull;</span> <span class="version-tag">v2.0.0</span>
+          </p>
+
+          <!-- Signature Diamond Hairline Divider -->
+          <div class="header-divider">
+            <span class="divider-line"></span>
+            <span class="divider-diamond">&#9671;</span>
+            <span class="divider-line"></span>
+          </div>
         </div>
 
-        <!-- Confirm Password (Only visible in Encrypt mode) -->
-        <div class="input-group" id="confirm-password-group">
-          <input id="confirm-pin" type="password" placeholder="Confirm Password" required />
-          <small id="password-match-msg" style="font-weight: 600;"></small>
+        <div class="header-actions">
+          <button type="button" id="open-maintenance-btn" class="maintenance-trigger-btn" title="Inspect & Clean Staging Workspaces">
+            <span class="btn-icon">&#128747;</span>
+            <span>Hygiene</span>
+          </button>
+          
+          <!-- Mode Segmented Capsule Switcher -->
+          <div class="mode-tabs-wrapper">
+            <div class="mode-tabs">
+              <button type="button" id="mode-encrypt-tab" class="tab-btn active-tab">Encrypt</button>
+              <button type="button" id="mode-decrypt-tab" class="tab-btn">Decrypt</button>
+            </div>
+          </div>
         </div>
+      </header>
+
+      <!-- Dual-Column Workspace Canvas -->
+      <div class="workspace-grid">
+        <!-- 01 · Vault Workflow Column -->
+        <section class="glass-card column-card">
+          <div class="card-header">            
+            <div class="header-text">
+              <h2 class="card-title">Vault Workflow</h2>
+              <span class="card-desc">Source selection and storage target routing</span>
+            </div>
+          </div>
+
+          <div class="workflow-stack">
+            <!-- Source Folder Selection Card -->
+            <div class="path-card">
+              <label class="field-label" id="source-location-label">SOURCE LOCATION</label>
+              <button type="button" id="select-source-btn" class="path-select-btn">
+                <span class="btn-icon">&#128194;</span>
+                <span class="btn-text">Select Input Folder to Encrypt</span>
+              </button>
+              <p id="target-path-display" class="path-readout" title="Click to copy path">No source selected</p>
+            </div>
+
+            <!-- Vault / Extraction Destination Selection Card -->
+            <div class="path-card">
+              <label class="field-label" id="output-dest-label">VAULT DESTINATION (.OBV)</label>
+              <button type="button" id="select-output-btn" class="path-select-btn">
+                <span class="btn-icon">&#128190;</span>
+                <span class="btn-text">Select Vault Output Folder</span>
+              </button>
+              <p id="output-path-display" class="path-readout" title="Click to copy path">No output destination selected</p>
+            </div>
+
+            <!-- Key Routing Mode & Destination Card -->
+            <div class="path-card" id="key-section-card">
+              <div id="key-mode-wrapper" class="input-group">
+                <label for="key-mode-select" class="field-label">KEY HANDLING MODE</label>
+                <select id="key-mode-select" class="styled-select">
+                  <option value="generate">Generate Keys &amp; Encrypt Vault (.obk + .obp)</option>
+                  <option value="existing_obp">Seal with Existing Public Key (.obp)</option>
+                </select>
+              </div>
+
+              <!-- Dynamic One-Way Sealing Notice -->
+              <div id="public-sealing-banner" class="sealing-banner" style="display: none;">
+                <span class="sealing-icon">&#128274;</span>
+                <span>One-Way Sealing Active: No private key will be generated or exposed on this system.</span>
+              </div>
+
+              <div class="key-destination-wrapper" id="key-dest-subblock">
+                <label class="field-label" id="key-dest-label" style="margin-top: 8px;">KEY DESTINATION (.OBK / .OBP)</label>
+                <button type="button" id="select-key-btn" class="path-select-btn key-select-accent">
+                  <span class="btn-icon">&#128273;</span>
+                  <span class="btn-text">Select Folder to Save Keys (.obk / .obp)</span>
+                </button>
+                <p id="key-path-display" class="path-readout" title="Click to copy path">No key location selected</p>
+              </div>
+            </div>
+
+            <!-- Live Storage & Integrity Telemetry -->
+            <div id="space-telemetry-box" class="telemetry-box" style="display: none;">
+              <span id="space-telemetry-text">Assessing storage &amp; path safety...</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 02 · Security Configuration Column -->
+        <section class="glass-card column-card">
+          <div class="card-header">
+            <div class="header-text">
+              <h2 class="card-title">Security Configuration</h2>
+              <span class="card-desc">Cipher algorithms, post-quantum KEM &amp; credentials</span>
+            </div>
+          </div>
+
+          <div class="security-stack">
+            <!-- Algorithm Profiles Grid -->
+            <div class="settings-group" id="settings-group">
+              <div class="input-group">
+                <label for="cipher-algo" class="field-label">CIPHER ALGORITHM</label>
+                <select id="cipher-algo" class="styled-select">
+                  <option value="xchacha20">XChaCha20-Poly1305 (256-bit)</option>
+                  <option value="aes256gcm">AES-256-GCM (Hardware Accel)</option>
+                </select>
+              </div>
+
+              <div class="input-group" id="kem-algo-group">
+                <label for="kem-algo" class="field-label">HYBRID KEM PROFILE</label>
+                <select id="kem-algo" class="styled-select">
+                  <option value="xwing">X-Wing (ML-KEM-768 + X25519)</option>
+                  <option value="cypherpunk">Cypherpunk (ML-KEM-1024 + X25519)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Authentication Inputs with Visibility Toggles -->
+            <div class="credentials-group">
+              <div class="input-group">
+                <label for="main-pin" class="field-label">MASTER PASSWORD</label>
+                <div class="password-input-wrap">
+                  <input id="main-pin" type="password" placeholder="Enter master passphrase" required />
+                  <button type="button" class="eye-toggle-btn" data-target="main-pin" title="Reveal Password (8s auto-hide)">&#128065;</button>
+                </div>
+                <div id="password-strength-container" class="strength-meter-wrap" style="display: none;">
+                  <div id="password-strength-bar" class="strength-bar"></div>
+                </div>
+                <small id="password-strength-text" class="strength-label" style="display: none;"></small>
+              </div>
+
+              <div class="input-group" id="confirm-password-group">
+                <label for="confirm-pin" class="field-label">CONFIRM MASTER PASSWORD</label>
+                <div class="password-input-wrap">
+                  <input id="confirm-pin" type="password" placeholder="Confirm master passphrase" required />
+                  <button type="button" class="eye-toggle-btn" data-target="confirm-pin" title="Reveal Password (8s auto-hide)">&#128065;</button>
+                </div>
+                <small id="password-match-msg" class="validation-msg"></small>
+              </div>
+            </div>
+
+            <!-- Advanced Security Options (Duress Trapdoor) -->
+            <details class="advanced-options" id="advanced-options">
+              <summary class="advanced-summary">
+                <span>Advanced Coercion Defense (Duress Trapdoor)</span>
+                <span class="chevron-icon">&#9662;</span>
+              </summary>
+              <div class="advanced-group">
+                <div class="deception-inputs-grid">
+                  <div class="input-group">
+                    <label for="deception-passcode" class="field-label">DECEPTION PASSCODE</label>
+                    <div class="password-input-wrap">
+                      <input id="deception-passcode" type="password" placeholder="Duress trapdoor passcode" />
+                      <button type="button" class="eye-toggle-btn" data-target="deception-passcode" title="Reveal Passcode (8s auto-hide)">&#128065;</button>
+                    </div>
+                  </div>
+                  <div class="input-group">
+                    <label for="confirm-deception-passcode" class="field-label">CONFIRM PASSCODE</label>
+                    <div class="password-input-wrap">
+                      <input id="confirm-deception-passcode" type="password" placeholder="Confirm duress passcode" />
+                      <button type="button" class="eye-toggle-btn" data-target="confirm-deception-passcode" title="Reveal Passcode (8s auto-hide)">&#128065;</button>
+                    </div>
+                  </div>
+                </div>
+                <small id="deception-match-msg" class="validation-msg"></small>
+                <p class="duress-notice">
+                  Entering this passcode triggers an in-place CSPRNG key scramble while displaying a standard authentication error.
+                </p>
+              </div>
+            </details>
+          </div>
+        </section>
       </div>
 
-      <!-- Deception Passcode -->
-      <details class="advanced-options" id="advanced-options">
-        <summary class="neon-green-text">Advanced Security Options (Duress Trapdoor)</summary>
-        <div class="advanced-group">
-          <div class="password-grid">
-            <input id="deception-passcode" type="password" placeholder="Deception Passcode" />
-            <input id="confirm-deception-passcode" type="password" placeholder="Confirm Deception" />
-          </div>
-          <small id="deception-match-msg" style="font-weight: 600;"></small>
-          <small class="neon-green-text">Silently scrambles .obk key file upon duress entry.</small>
-        </div>
-      </details>
+      <!-- Execution Panel & Phased Telemetry -->
+      <section class="glass-card execution-panel">
+        <p id="status-msg" class="status-stream-msg"></p>
 
-      <button type="submit" id="action-btn">Lock Vault</button>
-      <button type="button" id="cancel-clean-btn" class="cancel-clean-btn" style="display: none;">Cancel Operation</button>
+        <!-- Phased Milestone Telemetry (Active During Operations) -->
+        <div id="progress-container" class="progress-wrap" style="display: none;">
+          <div class="phase-milestones">
+            <div class="phase-node active" id="phase-node-1">
+              <span class="node-dot"></span>
+              <span class="node-text">1. Preflight &amp; Keys</span>
+            </div>
+            <div class="phase-line" id="phase-line-1"></div>
+            <div class="phase-node" id="phase-node-2">
+              <span class="node-dot"></span>
+              <span class="node-text">2. Streaming AEAD</span>
+            </div>
+            <div class="phase-line" id="phase-line-2"></div>
+            <div class="phase-node" id="phase-node-3">
+              <span class="node-dot"></span>
+              <span class="node-text">3. Atomic Commit</span>
+            </div>
+          </div>
+
+          <div class="progress-meta">
+            <span id="progress-percent" class="progress-val">0%</span>
+            <span id="progress-eta" class="progress-time">Initializing pipeline...</span>
+          </div>
+          <div class="progress-track">
+            <div id="progress-bar" class="progress-fill"></div>
+          </div>
+        </div>
+
+        <!-- Action Row -->
+        <div class="action-row">
+          <button type="submit" id="action-btn" class="primary-execute-btn">Lock Vault</button>
+          <button type="button" id="abort-btn" class="abort-operation-btn" style="display: none;">Abort Operation</button>
+        </div>
+      </section>
     </form>
 
-    <!-- Progress Bar -->
-    <div id="progress-container" style="display: none; width: 100%; margin-top: 10px;">
-      <div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 4px; color: var(--text-secondary);">
-        <span id="progress-percent">0%</span>
-        <span id="progress-eta">Calculating ETA...</span>
-      </div>
-      <div style="background-color: var(--panel-bg); border-radius: 4px; border: 1px solid var(--border); overflow: hidden;">
-        <div id="progress-bar" style="width: 0%; height: 8px; background: linear-gradient(90deg, #0284c7 0%, #38bdf8 100%); transition: width 0.1s linear;"></div>
+    <!-- Staging Hygiene & Maintenance Modal -->
+    <div id="maintenance-modal" class="modal-backdrop" style="display: none;">
+      <div class="glass-card modal-card">
+        <div class="card-header modal-header">
+          <span class="step-badge">&#128747;</span>
+          <div class="header-text">
+            <h2 class="card-title">Staging Hygiene &amp; Maintenance</h2>
+            <span class="card-desc">Safely scan and purge residual abandoned temporary workspaces</span>
+          </div>
+          <button type="button" id="close-maintenance-btn" class="modal-close-btn">&times;</button>
+        </div>
+
+        <div class="modal-body">
+          <p class="modal-hint">
+            The cleaner will safely purge orphaned .part staging files, empty markerless staging folders, and stale unlocked sentinels in your configured workspace directories while strictly preserving unowned or active data.
+          </p>
+
+          <div class="clean-targets-box">
+            <label class="field-label">TARGET DIRECTORIES TO SCAN</label>
+            <ul id="maintenance-dirs-list" class="target-dirs-list">
+              <li>No folders currently selected</li>
+            </ul>
+          </div>
+
+          <div id="maintenance-report-box" class="maintenance-report" style="display: none;">
+            <p id="maintenance-report-summary"></p>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" id="execute-maintenance-btn" class="maintenance-exec-btn">Run Cleanup Sweep</button>
+        </div>
       </div>
     </div>
-    <p id="status-msg"></p>
 
-    <!-- Copyright Footer -->
-    <p class="footer-copy">
-      Copyright &copy; 2026 Abhishek Biswas (Ombraveil). All rights reserved.
-    </p>
+    <!-- Restored Original Copyright Footer -->
+    <footer class="app-footer">
+      <p class="footer-copy">
+        Copyright &copy; 2026 Abhishek Biswas (Ombraveil). All rights reserved.
+      </p>
+    </footer>
   </main>
 </body>
 
