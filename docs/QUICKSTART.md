@@ -51,9 +51,9 @@ Use this mode to back up sensitive files to commercial cloud storage (Google Dri
 1. Launch Ombracrypt.
 2. Under **Cipher Algorithm**, select your symmetric AEAD engine:
    - `XChaCha20-Poly1305` (recommended default; 192-bit extended nonce resilience).
-   - `AES-256-GCM` (hardware-accelerated AES-NI).
+   - `AES-256-GCM` (hardware acceleration where supported).
 3. Under **KEM Algorithm**, select your hybrid post-quantum encapsulation profile:
-   - **IETF X-Wing:** Standard hybrid (`ML-KEM-768` + `X25519`).
+   - **X-Wing (IETF Internet-Draft draft-11):** Hybrid profile (`ML-KEM-768` + `X25519`).
    - **Cypherpunk:** High-security profile (`ML-KEM-1024` + `X25519`).
 4. Enter and confirm a strong **Master Password**.
 5. *(Optional)* Expand **Advanced Security Options** to configure a **Deception Passcode** for coercion defense.
@@ -65,10 +65,9 @@ Use this mode to back up sensitive files to commercial cloud storage (Google Dri
 4. Wait for the progress indicator to reach 100%.
 
 #### Step 3: Key Separation & Cloud Upload
-Upon completion, three linked artifacts will exist in the parent folder of the source directory:
-* `[FolderName].obv` (Encrypted Vault)
-* `[FolderName].obk` (Private Key)
-* `[FolderName].obp` (Public Key)
+Upon completion, artifacts are written to their respective configured directories:
+* `[FolderName].obv` (Encrypted Vault) is written to your chosen **Vault Destination**.
+* `[FolderName].obk` (Private Key) and `[FolderName].obp` (Public Key) are written to your chosen **Key Destination** (when generating a new keypair; using an existing `.obp` produces no new private key).
 
 > **Mandatory Security Action:**  
 > 1. Move `[FolderName].obk` immediately to an air-gapped, offline storage drive (e.g., hardware-encrypted USB).  
@@ -142,7 +141,7 @@ The recipient downloads `project_data.obv`, launches Ombracrypt, provides their 
 
 ## Coercion Defense: Deception Passcode (Duress Failsafe)
 
-The Deception Passcode is a cryptographic zeroization mechanism designed for physical coercion, border inspections, or hostile access demands.
+The Deception Passcode is a local private-key overwrite countermeasure intended for physical coercion, border inspections, or hostile access demands.
 
 ### Mechanism & Behavior
 
