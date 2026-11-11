@@ -52,7 +52,7 @@
       <div class="workspace-grid">
         <!-- 01 · Vault Workflow Column -->
         <section class="glass-card column-card">
-          <div class="card-header">            
+          <div class="card-header">
             <div class="header-text">
               <h2 class="card-title">Vault Workflow</h2>
               <span class="card-desc">Source selection and storage target routing</span>
@@ -191,7 +191,7 @@
                 </div>
                 <small id="deception-match-msg" class="validation-msg"></small>
                 <p class="duress-notice">
-                  Entering this passcode triggers an in-place CSPRNG key scramble while displaying a standard authentication error.
+                  Entering this passcode initiates an in-place CSPRNG overwrite attempt against the selected private key file while displaying a standard authentication error. Physical erasure cannot be guaranteed.
                 </p>
               </div>
             </details>
@@ -240,15 +240,15 @@
     </form>
 
     <!-- Staging Hygiene & Maintenance Modal -->
-    <div id="maintenance-modal" class="modal-backdrop" style="display: none;">
+    <div id="maintenance-modal" class="modal-backdrop" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="maintenance-title">
       <div class="glass-card modal-card">
         <div class="card-header modal-header">
           <span class="step-badge">&#128747;</span>
           <div class="header-text">
-            <h2 class="card-title">Staging Hygiene &amp; Maintenance</h2>
+            <h2 class="card-title" id="maintenance-title">Staging Hygiene &amp; Maintenance</h2>
             <span class="card-desc">Safely scan and purge residual abandoned temporary workspaces</span>
           </div>
-          <button type="button" id="close-maintenance-btn" class="modal-close-btn">&times;</button>
+          <button type="button" id="close-maintenance-btn" class="modal-close-btn" aria-label="Close dialog">&times;</button>
         </div>
 
         <div class="modal-body">

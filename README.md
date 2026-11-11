@@ -359,14 +359,14 @@ ombracrypt/
 ├── images/                            # Application captures and schematics
 ├── src/                               # Frontend Presentation Layer (Tauri WebView)
 │   ├── assets/                        # Static UI assets and icons
-│   ├── index.html                     # Fixed-geometry workspace layout & controls
+│   ├── index.html                     # Responsive two-column workspace layout
 │   ├── main.js                        # IPC event dispatchers, progress telemetry
 │   └── styles.css                     # Ombraveil dark UI styling & typography
 ├── src-tauri/                         # Native Rust Core Engine
 │   ├── build.rs                       # Tauri native build script
 │   ├── Cargo.lock                     # Locked Rust dependency tree
 │   ├── Cargo.toml                     # Manifest (fips203, x25519-dalek, sha3, argon2)
-│   ├── tauri.conf.json                # Fixed 650x900 window geometry & app metadata
+│   ├── tauri.conf.json                # 1080x720 window geometry & app metadata
 │   ├── capabilities/
 │   │   └── default.json               # Desktop security policy & IPC permissions
 │   ├── icons/                         # Desktop and mobile application icon sets

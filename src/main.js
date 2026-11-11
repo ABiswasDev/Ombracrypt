@@ -79,6 +79,8 @@ let keyPath = null;
 let storageCheckPassed = false;
 let streamStartTime = 0;
 let isOperationRunning = false;
+let preflightRequestId = 0;
+let lastFocusedElement = null;
 const hideTimeouts = new Map();
 
 // --- Mode Switching Logic ---
@@ -115,8 +117,30 @@ function updateExecutionUI() {
   }
 }
 
+function clearCredentials() {
+  mainPinInput.value = "";
+  confirmPinInput.value = "";
+  deceptionInput.value = "";
+  confirmDeceptionInput.value = "";
+
+  hideTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
+  hideTimeouts.clear();
+  mainPinInput.type = "password";
+  confirmPinInput.type = "password";
+  deceptionInput.type = "password";
+  confirmDeceptionInput.type = "password";
+  document.querySelectorAll(".eye-toggle-btn").forEach((btn) => (btn.innerHTML = "&#128065;"));
+
+  matchMsg.textContent = "";
+  deceptionMatchMsg.textContent = "";
+  strengthContainer.style.display = "none";
+  strengthText.style.display = "none";
+}
+
 function switchMode(newMode) {
   if (isOperationRunning) return;
+
+  preflightRequestId++; // Invalidate any pending asynchronous preflight checks
 
   currentMode = newMode;
   targetPath = null;
@@ -130,7 +154,9 @@ function switchMode(newMode) {
   spaceTelemetryBox.style.display = "none";
   statusMsg.textContent = "";
 
+  clearCredentials();
   resetProgressPhases();
+
   progressContainer.style.display = "none";
   progressBar.style.width = "0%";
   if (progressPercent) progressPercent.textContent = "0%";
@@ -177,8 +203,6 @@ function switchMode(newMode) {
     advancedOptions.style.display = "none";
     confirmGroup.style.display = "none";
     confirmPinInput.required = false;
-    strengthContainer.style.display = "none";
-    strengthText.style.display = "none";
 
     actionBtn.textContent = "Unlock Vault";
     actionBtn.style.background = "linear-gradient(135deg, #059669 0%, #34d399 100%)";
@@ -308,7 +332,7 @@ selectKeyBtn.addEventListener("click", async () => {
   });
 });
 
-// --- Pre-Flight Disk Space & Collision Check ---
+// --- Monotonic Request-Sequenced Pre-Flight Space Check ---
 async function runPreFlightSpaceCheck() {
   if (!targetPath || !outputDir) {
     spaceTelemetryBox.style.display = "none";
@@ -316,17 +340,25 @@ async function runPreFlightSpaceCheck() {
     return;
   }
 
+  const requestId = ++preflightRequestId;
+  const capturedMode = currentMode;
+  const capturedSource = targetPath;
+  const capturedOutput = outputDir;
+  const capturedKey = keyPath;
+
   spaceTelemetryBox.style.display = "block";
   spaceTelemetryText.textContent = "Assessing storage & path safety...";
   spaceTelemetryBox.className = "telemetry-box";
 
   try {
     const report = await invoke("inspect_path_space", {
-      mode: currentMode,
-      sourcePath: targetPath,
-      outputDir: outputDir,
-      keyDirOrFile: keyPath,
+      mode: capturedMode,
+      sourcePath: capturedSource,
+      outputDir: capturedOutput,
+      keyDirOrFile: capturedKey,
     });
+
+    if (requestId !== preflightRequestId) return;
 
     if (!report.sufficient) {
       spaceTelemetryText.textContent = `Insufficient Space! ${report.summary}`;
@@ -348,6 +380,7 @@ async function runPreFlightSpaceCheck() {
       storageCheckPassed = true;
     }
   } catch (err) {
+    if (requestId !== preflightRequestId) return;
     spaceTelemetryText.textContent = `Check Error: ${err}`;
     spaceTelemetryBox.className = "telemetry-box telemetry-error";
     actionBtn.disabled = true;
@@ -369,9 +402,11 @@ abortBtn.addEventListener("click", async () => {
   }
 });
 
-// --- Staging Hygiene / Maintenance Modal Handlers ---
-openMaintenanceBtn.addEventListener("click", () => {
+// --- Accessible Staging Hygiene / Maintenance Modal Handlers ---
+function openMaintenanceModal() {
   if (isOperationRunning) return;
+  lastFocusedElement = document.activeElement;
+
   const dirs = getActiveTargetDirs();
   maintenanceDirsList.innerHTML = "";
   if (dirs.length === 0) {
@@ -385,17 +420,31 @@ openMaintenanceBtn.addEventListener("click", () => {
     });
     executeMaintenanceBtn.disabled = false;
   }
+
   maintenanceReportBox.style.display = "none";
   maintenanceModal.style.display = "flex";
-});
+  closeMaintenanceBtn.focus();
+}
 
-closeMaintenanceBtn.addEventListener("click", () => {
+function closeMaintenanceModal() {
   maintenanceModal.style.display = "none";
-});
+  if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
+    lastFocusedElement.focus();
+  }
+}
+
+openMaintenanceBtn.addEventListener("click", openMaintenanceModal);
+closeMaintenanceBtn.addEventListener("click", closeMaintenanceModal);
 
 window.addEventListener("click", (e) => {
   if (e.target === maintenanceModal) {
-    maintenanceModal.style.display = "none";
+    closeMaintenanceModal();
+  }
+});
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && maintenanceModal.style.display === "flex") {
+    closeMaintenanceModal();
   }
 });
 
@@ -512,7 +561,7 @@ function checkPasswordStrength(password) {
   } else {
     strengthBar.style.width = "100%";
     strengthBar.style.backgroundColor = "#00f0ff";
-    strengthText.textContent = "Strength: Spectral Shield (Strong)";
+    strengthText.textContent = "Strength: Spectral Shield (Estimated Strong)";
     strengthText.style.color = "#38bdf8";
   }
 }
@@ -704,15 +753,6 @@ cryptoForm.addEventListener("submit", async (e) => {
   } finally {
     isOperationRunning = false;
     updateExecutionUI();
-
-    mainPinInput.value = "";
-    confirmPinInput.value = "";
-    deceptionInput.value = "";
-    confirmDeceptionInput.value = "";
-
-    matchMsg.textContent = "";
-    deceptionMatchMsg.textContent = "";
-    strengthContainer.style.display = "none";
-    strengthText.style.display = "none";
+    clearCredentials();
   }
 });

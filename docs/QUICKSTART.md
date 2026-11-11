@@ -59,7 +59,7 @@ Use this mode to back up sensitive files to commercial cloud storage (Google Dri
 5. *(Optional)* Expand **Advanced Security Options** to configure a **Deception Passcode** for coercion defense.
 
 #### Step 2: Select Source Directory & Lock Vault
-1. Click **Encrypt Folder** and choose the directory you want to secure.
+1. Click **Select Input Folder to Encrypt** and choose the directory you want to secure.
 2. Confirm the displayed target directory path.
 3. Click **Lock Vault**. Ombracrypt will compress the tree into an in-memory stream, derive chunk keys, and produce authenticated chunks.
 4. Wait for the progress indicator to reach 100%.
@@ -80,8 +80,8 @@ Upon completion, artifacts are written to their respective configured directorie
 
 1. Connect your offline media containing your `.obk` file to your workstation.
 2. Open Ombracrypt and navigate to the **Decrypt Vault** view.
-3. Under **Vault File**, select the `.obv` vault downloaded from your cloud backup.
-4. Under **Key File**, select the corresponding `.obk` file from your offline media.
+3. Click **Select Vault File (.obv)** to choose the downloaded `.obv` container.
+4. Click **Select Private Key (.obk)** to choose the corresponding `.obk` file from your offline media.
 5. Enter your **Master Password**.
 6. Click **Unlock Vault**.
 7. The engine authenticates the stream chunk-by-chunk into an isolated staging workspace and atomically publishes the restored folder upon full cryptographic verification.
@@ -122,7 +122,7 @@ Recipient (Data Steward)                  Sender (Contributor / CI/CD)
 
 #### 2. Sender Seals Vault (One-Way Encryption)
 1. The sender opens Ombracrypt and selects the folder to send.
-2. Instead of generating a new private key, the sender loads `team_lead.obp` into the public key input.
+2. Under **Key Handling Mode**, select **Seal with Existing Public Key (.obp)**, then click **Select Public Key (.obp)** to choose `team_lead.obp`.
 3. The sender enters the agreed project passphrase and locks the vault.
 4. The resulting `project_data.obv` file is created.
 
