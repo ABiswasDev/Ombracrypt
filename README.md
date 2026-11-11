@@ -241,7 +241,7 @@ Ombracrypt implements two distinct publication pathways depending on whether the
    * **macOS:** `libc::renamex_np` with `RENAME_EXCL`
    * **Windows:** `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING`
    Directories are never published through hard links.
-3. **Fail-Closed Guarantees:** If the target directory or file already exists—or is a dangling symlink—publication fails closed with an explicit error, leaving existing user files untouched. On unsupported operating systems (`fallback.rs`) or filesystems lacking kernel-enforced locking and atomic no-replace publication semantics, the engine acts as an intentional fail-closed security boundary and refuses execution rather than falling back to racy userspace approximations.
+3. **Fail-Closed Guarantees:** If the target directory or file already exists—or is a dangling symlink—publication fails closed with an explicit error, leaving existing user files untouched. On unsupported operating systems (`fallback.rs`) or filesystems lacking the required locking and atomic no-replace primitives, operations that depend on those guarantees are rejected. The engine does not substitute racy userspace approximations.
 
 ### Best-Effort Transactional Rollback
 Staging operations for multi-file commits (such as `.obv`, `.obk`, and `.obp` creation) are tracked by `CommitRollbackGuard`. If publication of a subsequent artifact fails, the transaction guard attempts to remove artifacts already committed during the operation. This rollback is not crash-atomic across multiple filesystem entries. Unexpected process termination, power loss, kernel failure, or filesystem errors may leave partially published artifacts behind.
@@ -270,6 +270,7 @@ Untrusted TAR archives inside `.obv` containers pass through defensive boundary 
 * **Offline Phantom Block Analysis:** The Duress Trapdoor is an interactive countermeasure. An adversary who clones the `.obk` file prior to the interaction can bypass the in-place overwrite.
 * **Flash Storage Wear-Leveling Residue:** Overwriting an `.obk` file flushes CSPRNG noise to the filesystem, but SSD controllers using dynamic wear-leveling may retain latent physical flash blocks until trimmed or garbage-collected.
 * **Decryption Staging Residue & Crash Recovery:** Encryption streams directly from memory without staging unencrypted TAR archives on disk. Decryption extracts plaintext into a restricted, two-tier staging wrapper (`.ombracrypt_stage_<hex>/payload/`) guarded by an exclusively locked `.active.lock` sentinel. If interrupted by a crash or power loss:
+  * **Stale Unlocked Staging Wrappers:** Staging directories possessing a valid `.active.lock` sentinel whose lock has been released are eligible for automated cleanup attempts once verified.
   * **Markerless Empty Wrappers:** Abandoned `.ombracrypt_stage_<hex>` directories containing zero entries (such as remnants left when a crash occurs after payload publication) are safely removed non-recursively.
   * **Unowned Non-Empty Directories:** Any staging-named folder lacking a valid `.active.lock` that contains unrecognized files is strictly preserved and flagged as unowned/skipped to protect arbitrary user data from deletion.
 * **Linux Extraction Filesystem Compatibility:** Final extraction requires atomic no-replace directory publication (`RENAME_NOREPLACE`). Certain filesystem drivers or mount overlays (notably userspace FUSE mounts such as `ntfs-3g` and eCryptfs) reject this flag with `EINVAL` (os error 22). Ombracrypt fails closed without clobbering existing files and provides actionable diagnostics advising extraction to native Linux filesystems (such as ext4 or btrfs) or remounting NTFS partitions with the in-kernel `ntfs3` driver.
@@ -286,7 +287,7 @@ cd src-tauri
 cargo test --release
 ```
 
-Comprehensive regression and Known-Answer Test (KAT) suites run automatically across Ubuntu, macOS, and Windows on every commit via GitHub Actions (Windows omits Unix-specific file permission and symlink test cases). Up-to-date execution status and test run metrics are tracked in the repository's [CI Workflow](https://github.com/ABiswasDev/Ombracrypt/actions/workflows/ci.yml).
+Comprehensive regression and Known-Answer Test (KAT) suites run automatically on applicable pushes and pull requests targeting main across Ubuntu, macOS, and Windows via GitHub Actions (Windows omits Unix-specific file permission and symlink test cases). Up-to-date execution status and test run metrics are tracked in the repository's [CI Workflow](https://github.com/ABiswasDev/Ombracrypt/actions/workflows/ci.yml).
 
 ### Coverage Breakdown
 
@@ -411,5 +412,5 @@ ombracrypt/
 
 > ### ⚠️ Critical Security Warning & Zero-Escrow Notice
 >
-> * **Zero Backdoors, Zero Escrow:** Ombracrypt enforces a local, zero-escrow security architecture. There are no backdoor master keys, recovery phrases, password reset mechanisms, or administrative bypasses. If you lose your Master Password or your `.obk` private key file, your data is **cryptographically unrecoverable**. Always maintain independent, verified backups of your private keys in offline, tamper-evident physical storage.
-> * **Irreversible Duress Key Scrambling:** Entering your optional Deception Passcode initiates an in-place CSPRNG overwrite of the selected `.obk` private key file on disk. Once overwritten, that specific key file copy is permanently corrupted, and any vault relying exclusively upon it **can never be decrypted again**. Data recovery is only possible if an independent offline backup of the key exists. Configure and use this countermeasure only with full awareness of its operational consequences.
+> * **Zero Backdoors, Zero Escrow:** Ombracrypt enforces a local, zero-escrow security architecture. There are no backdoor master keys, recovery phrases, password reset mechanisms, or administrative bypasses. If you lose your Master Password or no usable copy of your `.obk` private key file exists, your data is **cryptographically unrecoverable**. Always maintain independent, verified backups of your private keys in offline, tamper-evident physical storage.
+> * **Irreversible Duress Key Scrambling:** Entering your optional Deception Passcode initiates an in-place CSPRNG overwrite of the selected `.obk` private key file on disk. Once overwritten, that specific key file copy is permanently corrupted. If no other usable copy of the private key exists, overwriting the selected `.obk` prevents decryption using that key material. Previously copied keys and storage-level remnants remain outside this protection. Configure and use this countermeasure only with full awareness of its operational consequences.
