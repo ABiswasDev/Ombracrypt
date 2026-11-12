@@ -110,8 +110,8 @@ function setFormControlsDisabled(disabled) {
   kemAlgoSelect.disabled = disabled;
   mainPinInput.disabled = disabled;
   confirmPinInput.disabled = disabled;
-  deceptionInput.disabled = disabled;
-  confirmDeceptionInput.disabled = disabled;
+  deceptionInput.disabled = disabled || standaloneKeygen;
+  confirmDeceptionInput.disabled = disabled || standaloneKeygen;
   modeEncryptTab.disabled = disabled;
   modeDecryptTab.disabled = disabled;
   openMaintenanceBtn.disabled = disabled;
@@ -208,6 +208,7 @@ function switchMode(newMode) {
     selectKeyBtn.querySelector(".btn-text").textContent = "Select Private Key (.obk)";
 
     settingsGroup.style.display = "none";
+    advancedOptions.open = false;
     advancedOptions.style.display = "none";
     credentialsGroup.style.display = "flex";
     confirmGroup.style.display = "none";
@@ -233,6 +234,7 @@ keyModeSelect.addEventListener("change", () => {
   resetProgressPhases();
   progressContainer.style.display = "none";
   updateKeyModeUI();
+  updateExecutionUI();
   runPreFlightSpaceCheck();
 });
 
@@ -254,7 +256,7 @@ function updateKeyModeUI() {
     keyDestLabel.textContent = "KEYPAIR OUTPUT DESTINATION (.OBK + .OBP)";
     selectKeyBtn.querySelector(".btn-text").textContent = "Select Folder to Save Keypair (.obk + .obp)";
 
-    // Security configuration: Show KEM profile only (cipher & master password are per-vault)
+    // Security configuration: Show KEM profile only; restrict Duress Trapdoor to single-user vault encryption
     settingsGroup.classList.add("single-col");
     cipherAlgoGroup.style.display = "none";
     kemAlgoGroup.style.display = "flex";
@@ -262,7 +264,11 @@ function updateKeyModeUI() {
     credentialsGroup.style.display = "none";
     mainPinInput.required = false;
     confirmPinInput.required = false;
-    advancedOptions.style.display = "block";
+    deceptionInput.value = "";
+    confirmDeceptionInput.value = "";
+    deceptionMatchMsg.textContent = "";
+    advancedOptions.open = false;
+    advancedOptions.style.display = "none";
 
     actionBtn.textContent = "Generate Keypair";
     actionBtn.style.background = "linear-gradient(135deg, #0284c7 0%, #00f0ff 100%)";
@@ -294,6 +300,7 @@ function updateKeyModeUI() {
     confirmGroup.style.display = "flex";
     mainPinInput.required = true;
     confirmPinInput.required = true;
+    advancedOptions.open = false;
     advancedOptions.style.display = "none";
 
     actionBtn.textContent = "Lock Vault";
@@ -704,7 +711,12 @@ function checkPasswordMatch() {
 }
 
 function checkDeceptionValidation() {
-  const masterPin = isStandaloneKeygenMode() ? "" : mainPinInput.value;
+  if (isStandaloneKeygenMode()) {
+    deceptionMatchMsg.textContent = "";
+    return;
+  }
+
+  const masterPin = mainPinInput.value;
   const d1 = deceptionInput.value;
   const d2 = confirmDeceptionInput.value;
 
@@ -811,7 +823,7 @@ cryptoForm.addEventListener("submit", async (e) => {
   const confirmDeception = confirmDeceptionInput.value;
   const kem = kemAlgoSelect.value;
 
-  // --- Branch 1: Standalone Keypair Generation Only ---
+  // --- Branch 1: Standalone Keypair Generation Only (Duress Trapdoor disabled -> writes 32B CSPRNG noise) ---
   if (isStandaloneKeygenMode()) {
     if (!keyPath) {
       statusMsg.textContent = "Please select a Keypair Output Destination folder before generating.";
@@ -822,12 +834,6 @@ cryptoForm.addEventListener("submit", async (e) => {
     const rawName = keyNameInput.value.trim();
     if (!rawName || rawName.includes("/") || rawName.includes("\\") || rawName.includes("..")) {
       statusMsg.textContent = "Error: Please enter a valid Keypair File Prefix without path separators.";
-      statusMsg.style.color = "#f87171";
-      return;
-    }
-
-    if (deceptionPasscode && deceptionPasscode !== confirmDeception) {
-      statusMsg.textContent = "Error: Deception passcodes do not match.";
       statusMsg.style.color = "#f87171";
       return;
     }
@@ -850,7 +856,7 @@ cryptoForm.addEventListener("submit", async (e) => {
         outputDir: keyPath,
         keyName: rawName,
         kem: kem,
-        deceptionPasscode: deceptionPasscode,
+        deceptionPasscode: "",
       });
 
       progressBar.style.width = "100%";
