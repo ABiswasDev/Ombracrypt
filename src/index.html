@@ -50,7 +50,7 @@
 
       <!-- Dual-Column Workspace Canvas -->
       <div class="workspace-grid">
-        <!-- 01 · Vault Workflow Column -->
+        <!-- Vault Workflow Column -->
         <section class="glass-card column-card">
           <div class="card-header">
             <div class="header-text">
@@ -61,7 +61,7 @@
 
           <div class="workflow-stack">
             <!-- Source Folder Selection Card -->
-            <div class="path-card">
+            <div class="path-card" id="source-location-card">
               <label class="field-label" id="source-location-label">SOURCE LOCATION</label>
               <button type="button" id="select-source-btn" class="path-select-btn">
                 <span class="btn-icon">&#128194;</span>
@@ -71,7 +71,7 @@
             </div>
 
             <!-- Vault / Extraction Destination Selection Card -->
-            <div class="path-card">
+            <div class="path-card" id="vault-dest-card">
               <label class="field-label" id="output-dest-label">VAULT DESTINATION (.OBV)</label>
               <button type="button" id="select-output-btn" class="path-select-btn">
                 <span class="btn-icon">&#128190;</span>
@@ -85,7 +85,8 @@
               <div id="key-mode-wrapper" class="input-group">
                 <label for="key-mode-select" class="field-label">KEY HANDLING MODE</label>
                 <select id="key-mode-select" class="styled-select">
-                  <option value="generate">Generate Keys &amp; Encrypt Vault (.obk + .obp)</option>
+                  <option value="generate_only">Generate Keypair Only (.obk + .obp)</option>
+                  <option value="generate" selected>Generate Keys &amp; Encrypt Vault (.obk + .obp)</option>
                   <option value="existing_obp">Seal with Existing Public Key (.obp)</option>
                 </select>
               </div>
@@ -94,6 +95,12 @@
               <div id="public-sealing-banner" class="sealing-banner" style="display: none;">
                 <span class="sealing-icon">&#128274;</span>
                 <span>One-Way Sealing Active: No private key will be generated or exposed on this system.</span>
+              </div>
+
+              <!-- Standalone Keypair Filename Input (Visible only in generate_only mode) -->
+              <div id="key-name-wrapper" class="input-group" style="display: none; margin-top: 8px;">
+                <label for="key-name-input" class="field-label">KEYPAIR FILE PREFIX</label>
+                <input id="key-name-input" type="text" value="ombracrypt_key" placeholder="e.g., cold_storage_key" />
               </div>
 
               <div class="key-destination-wrapper" id="key-dest-subblock">
@@ -113,7 +120,7 @@
           </div>
         </section>
 
-        <!-- 02 · Security Configuration Column -->
+        <!-- Security Configuration Column -->
         <section class="glass-card column-card">
           <div class="card-header">
             <div class="header-text">
@@ -125,7 +132,7 @@
           <div class="security-stack">
             <!-- Algorithm Profiles Grid -->
             <div class="settings-group" id="settings-group">
-              <div class="input-group">
+              <div class="input-group" id="cipher-algo-group">
                 <label for="cipher-algo" class="field-label">CIPHER ALGORITHM</label>
                 <select id="cipher-algo" class="styled-select">
                   <option value="xchacha20">XChaCha20-Poly1305 (256-bit)</option>
@@ -142,8 +149,14 @@
               </div>
             </div>
 
+            <!-- Standalone Keygen Info Note -->
+            <div id="keygen-only-notice" class="sealing-banner" style="display: none; margin: 0;">
+              <span class="sealing-icon">&#128273;</span>
+              <span>Standalone Keypair Mode: Master Password is applied per-vault during encryption. Optional Duress Passcode below embeds into the .obk file.</span>
+            </div>
+
             <!-- Authentication Inputs with Visibility Toggles -->
-            <div class="credentials-group">
+            <div class="credentials-group" id="credentials-group">
               <div class="input-group">
                 <label for="main-pin" class="field-label">MASTER PASSWORD</label>
                 <div class="password-input-wrap">

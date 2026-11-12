@@ -7,10 +7,12 @@ const modeEncryptTab = document.getElementById("mode-encrypt-tab");
 const modeDecryptTab = document.getElementById("mode-decrypt-tab");
 
 // --- Path Selection Elements ---
+const sourceLocationCard = document.getElementById("source-location-card");
 const sourceLocationLabel = document.getElementById("source-location-label");
 const selectSourceBtn = document.getElementById("select-source-btn");
 const targetDisplay = document.getElementById("target-path-display");
 
+const vaultDestCard = document.getElementById("vault-dest-card");
 const outputDestLabel = document.getElementById("output-dest-label");
 const selectOutputBtn = document.getElementById("select-output-btn");
 const outputDisplay = document.getElementById("output-path-display");
@@ -18,6 +20,8 @@ const outputDisplay = document.getElementById("output-path-display");
 const keyModeWrapper = document.getElementById("key-mode-wrapper");
 const keyModeSelect = document.getElementById("key-mode-select");
 const publicSealingBanner = document.getElementById("public-sealing-banner");
+const keyNameWrapper = document.getElementById("key-name-wrapper");
+const keyNameInput = document.getElementById("key-name-input");
 const keyDestSubblock = document.getElementById("key-dest-subblock");
 const keyDestLabel = document.getElementById("key-dest-label");
 const selectKeyBtn = document.getElementById("select-key-btn");
@@ -28,9 +32,12 @@ const spaceTelemetryText = document.getElementById("space-telemetry-text");
 
 // --- Settings & Action Elements ---
 const settingsGroup = document.getElementById("settings-group");
+const cipherAlgoGroup = document.getElementById("cipher-algo-group");
 const cipherAlgoSelect = document.getElementById("cipher-algo");
 const kemAlgoSelect = document.getElementById("kem-algo");
 const kemAlgoGroup = document.getElementById("kem-algo-group");
+const keygenOnlyNotice = document.getElementById("keygen-only-notice");
+const credentialsGroup = document.getElementById("credentials-group");
 const advancedOptions = document.getElementById("advanced-options");
 const actionBtn = document.getElementById("action-btn");
 const abortBtn = document.getElementById("abort-btn");
@@ -87,11 +94,18 @@ const hideTimeouts = new Map();
 modeEncryptTab.addEventListener("click", () => switchMode("ENCRYPT"));
 modeDecryptTab.addEventListener("click", () => switchMode("DECRYPT"));
 
+function isStandaloneKeygenMode() {
+  return currentMode === "ENCRYPT" && keyModeSelect.value === "generate_only";
+}
+
 function setFormControlsDisabled(disabled) {
-  selectSourceBtn.disabled = disabled;
-  selectOutputBtn.disabled = disabled;
+  const standaloneKeygen = isStandaloneKeygenMode();
+
+  selectSourceBtn.disabled = disabled || standaloneKeygen;
+  selectOutputBtn.disabled = disabled || standaloneKeygen;
   selectKeyBtn.disabled = disabled;
   keyModeSelect.disabled = disabled;
+  keyNameInput.disabled = disabled;
   cipherAlgoSelect.disabled = disabled;
   kemAlgoSelect.disabled = disabled;
   mainPinInput.disabled = disabled;
@@ -162,30 +176,21 @@ function switchMode(newMode) {
   if (progressPercent) progressPercent.textContent = "0%";
   if (progressEta) progressEta.textContent = "";
 
-  updateExecutionUI();
-
   if (currentMode === "ENCRYPT") {
     modeEncryptTab.classList.add("active-tab");
     modeDecryptTab.classList.remove("active-tab");
 
-    if (sourceLocationLabel) sourceLocationLabel.textContent = "SOURCE LOCATION";
-    selectSourceBtn.querySelector(".btn-text").textContent = "Select Input Folder to Encrypt";
-
-    if (outputDestLabel) outputDestLabel.textContent = "VAULT DESTINATION (.OBV)";
-    selectOutputBtn.querySelector(".btn-text").textContent = "Select Vault Output Folder";
-
     keyModeWrapper.style.display = "flex";
-    updateKeyModeUI();
-
     settingsGroup.style.display = "grid";
-    confirmGroup.style.display = "flex";
-    confirmPinInput.required = true;
-    actionBtn.textContent = "Lock Vault";
-    actionBtn.style.background = "linear-gradient(135deg, #0284c7 0%, #00f0ff 100%)";
-    actionBtn.style.color = "#020817";
+    updateKeyModeUI();
   } else {
     modeDecryptTab.classList.add("active-tab");
     modeEncryptTab.classList.remove("active-tab");
+
+    sourceLocationCard.classList.remove("card-dimmed");
+    vaultDestCard.classList.remove("card-dimmed");
+    selectSourceBtn.disabled = false;
+    selectOutputBtn.disabled = false;
 
     if (sourceLocationLabel) sourceLocationLabel.textContent = "ENCRYPTED VAULT FILE";
     selectSourceBtn.querySelector(".btn-text").textContent = "Select Vault File (.obv)";
@@ -195,48 +200,143 @@ function switchMode(newMode) {
 
     keyModeWrapper.style.display = "none";
     publicSealingBanner.style.display = "none";
+    keyNameWrapper.style.display = "none";
+    keygenOnlyNotice.style.display = "none";
+
     keyDestSubblock.style.display = "block";
     keyDestLabel.textContent = "PRIVATE KEY LOCATION (.OBK)";
     selectKeyBtn.querySelector(".btn-text").textContent = "Select Private Key (.obk)";
 
     settingsGroup.style.display = "none";
     advancedOptions.style.display = "none";
+    credentialsGroup.style.display = "flex";
     confirmGroup.style.display = "none";
+    mainPinInput.required = true;
     confirmPinInput.required = false;
 
     actionBtn.textContent = "Unlock Vault";
     actionBtn.style.background = "linear-gradient(135deg, #059669 0%, #34d399 100%)";
     actionBtn.style.color = "#020817";
   }
+
+  updateExecutionUI();
 }
 
 // --- Key Handling Mode Switcher ---
 keyModeSelect.addEventListener("change", () => {
+  if (isOperationRunning) return;
+  preflightRequestId++;
   keyPath = null;
   keyDisplay.textContent = "No key location selected";
+  statusMsg.textContent = "";
+  clearCredentials();
+  resetProgressPhases();
+  progressContainer.style.display = "none";
   updateKeyModeUI();
   runPreFlightSpaceCheck();
 });
 
 function updateKeyModeUI() {
-  if (keyModeSelect.value === "existing_obp") {
+  const modeVal = keyModeSelect.value;
+
+  if (modeVal === "generate_only") {
+    // Dim and disable Source & Vault Destination cards
+    sourceLocationCard.classList.add("card-dimmed");
+    vaultDestCard.classList.add("card-dimmed");
+    selectSourceBtn.disabled = true;
+    selectOutputBtn.disabled = true;
+    targetDisplay.textContent = "Not required for standalone key generation";
+    outputDisplay.textContent = "Not required for standalone key generation";
+
+    // Key destination & filename prefix controls
+    publicSealingBanner.style.display = "none";
+    keyNameWrapper.style.display = "flex";
+    keyDestLabel.textContent = "KEYPAIR OUTPUT DESTINATION (.OBK + .OBP)";
+    selectKeyBtn.querySelector(".btn-text").textContent = "Select Folder to Save Keypair (.obk + .obp)";
+
+    // Security configuration: Show KEM profile only (cipher & master password are per-vault)
+    settingsGroup.classList.add("single-col");
+    cipherAlgoGroup.style.display = "none";
+    kemAlgoGroup.style.display = "flex";
+    keygenOnlyNotice.style.display = "flex";
+    credentialsGroup.style.display = "none";
+    mainPinInput.required = false;
+    confirmPinInput.required = false;
+    advancedOptions.style.display = "block";
+
+    actionBtn.textContent = "Generate Keypair";
+    actionBtn.style.background = "linear-gradient(135deg, #0284c7 0%, #00f0ff 100%)";
+    actionBtn.style.color = "#020817";
+  } else if (modeVal === "existing_obp") {
+    // Restore Source & Vault Destination cards
+    sourceLocationCard.classList.remove("card-dimmed");
+    vaultDestCard.classList.remove("card-dimmed");
+    selectSourceBtn.disabled = false;
+    selectOutputBtn.disabled = false;
+    if (!targetPath) targetDisplay.textContent = "No source selected";
+    if (!outputDir) outputDisplay.textContent = "No output destination selected";
+
+    if (sourceLocationLabel) sourceLocationLabel.textContent = "SOURCE LOCATION";
+    selectSourceBtn.querySelector(".btn-text").textContent = "Select Input Folder to Encrypt";
+    if (outputDestLabel) outputDestLabel.textContent = "VAULT DESTINATION (.OBV)";
+    selectOutputBtn.querySelector(".btn-text").textContent = "Select Vault Output Folder";
+
     publicSealingBanner.style.display = "flex";
+    keyNameWrapper.style.display = "none";
     keyDestLabel.textContent = "PUBLIC SEALING KEY (.OBP)";
     selectKeyBtn.querySelector(".btn-text").textContent = "Select Public Key (.obp)";
+
+    settingsGroup.classList.add("single-col");
+    cipherAlgoGroup.style.display = "flex";
     kemAlgoGroup.style.display = "none";
+    keygenOnlyNotice.style.display = "none";
+    credentialsGroup.style.display = "flex";
+    confirmGroup.style.display = "flex";
+    mainPinInput.required = true;
+    confirmPinInput.required = true;
     advancedOptions.style.display = "none";
+
+    actionBtn.textContent = "Lock Vault";
+    actionBtn.style.background = "linear-gradient(135deg, #0284c7 0%, #00f0ff 100%)";
+    actionBtn.style.color = "#020817";
   } else {
+    // Standard "generate" (Generate Keys & Encrypt Vault)
+    sourceLocationCard.classList.remove("card-dimmed");
+    vaultDestCard.classList.remove("card-dimmed");
+    selectSourceBtn.disabled = false;
+    selectOutputBtn.disabled = false;
+    if (!targetPath) targetDisplay.textContent = "No source selected";
+    if (!outputDir) outputDisplay.textContent = "No output destination selected";
+
+    if (sourceLocationLabel) sourceLocationLabel.textContent = "SOURCE LOCATION";
+    selectSourceBtn.querySelector(".btn-text").textContent = "Select Input Folder to Encrypt";
+    if (outputDestLabel) outputDestLabel.textContent = "VAULT DESTINATION (.OBV)";
+    selectOutputBtn.querySelector(".btn-text").textContent = "Select Vault Output Folder";
+
     publicSealingBanner.style.display = "none";
+    keyNameWrapper.style.display = "none";
     keyDestLabel.textContent = "KEY DESTINATION (.OBK / .OBP)";
     selectKeyBtn.querySelector(".btn-text").textContent = "Select Folder to Save Keys (.obk / .obp)";
+
+    settingsGroup.classList.remove("single-col");
+    cipherAlgoGroup.style.display = "flex";
     kemAlgoGroup.style.display = "flex";
+    keygenOnlyNotice.style.display = "none";
+    credentialsGroup.style.display = "flex";
+    confirmGroup.style.display = "flex";
+    mainPinInput.required = true;
+    confirmPinInput.required = true;
     advancedOptions.style.display = "block";
+
+    actionBtn.textContent = "Lock Vault";
+    actionBtn.style.background = "linear-gradient(135deg, #0284c7 0%, #00f0ff 100%)";
+    actionBtn.style.color = "#020817";
   }
 }
 
 // --- Path Selector Handlers ---
 selectSourceBtn.addEventListener("click", async () => {
-  if (isOperationRunning) return;
+  if (isOperationRunning || isStandaloneKeygenMode()) return;
   if (currentMode === "ENCRYPT") {
     const selected = await open({
       multiple: false,
@@ -264,7 +364,7 @@ selectSourceBtn.addEventListener("click", async () => {
 });
 
 selectOutputBtn.addEventListener("click", async () => {
-  if (isOperationRunning) return;
+  if (isOperationRunning || isStandaloneKeygenMode()) return;
   const selected = await open({
     multiple: false,
     directory: true,
@@ -282,7 +382,7 @@ selectOutputBtn.addEventListener("click", async () => {
 
 selectKeyBtn.addEventListener("click", async () => {
   if (isOperationRunning) return;
-  if (currentMode === "ENCRYPT" && keyModeSelect.value === "generate") {
+  if (currentMode === "ENCRYPT" && (keyModeSelect.value === "generate" || keyModeSelect.value === "generate_only")) {
     const selected = await open({
       multiple: false,
       directory: true,
@@ -323,17 +423,36 @@ selectKeyBtn.addEventListener("click", async () => {
 // Click-to-copy helper for path readouts
 [targetDisplay, outputDisplay, keyDisplay].forEach((display) => {
   display.addEventListener("click", () => {
-    if (display.textContent && !display.textContent.startsWith("No ")) {
-      navigator.clipboard.writeText(display.textContent);
-      const original = display.textContent;
+    const text = display.textContent;
+    if (
+      text &&
+      !text.startsWith("No ") &&
+      !text.startsWith("Not required") &&
+      text !== "Copied to clipboard!"
+    ) {
+      navigator.clipboard.writeText(text);
       display.textContent = "Copied to clipboard!";
-      setTimeout(() => (display.textContent = original), 1400);
+      setTimeout(() => (display.textContent = text), 1400);
     }
   });
 });
 
 // --- Monotonic Request-Sequenced Pre-Flight Space Check ---
 async function runPreFlightSpaceCheck() {
+  if (isStandaloneKeygenMode()) {
+    if (!keyPath) {
+      spaceTelemetryBox.style.display = "none";
+      storageCheckPassed = false;
+      return;
+    }
+    spaceTelemetryBox.style.display = "block";
+    spaceTelemetryBox.className = "telemetry-box telemetry-ok";
+    spaceTelemetryText.textContent = "Keypair Output Ready ✓ (Standalone .obk + .obp generation)";
+    actionBtn.disabled = false;
+    storageCheckPassed = true;
+    return;
+  }
+
   if (!targetPath || !outputDir) {
     spaceTelemetryBox.style.display = "none";
     storageCheckPassed = false;
@@ -450,7 +569,7 @@ window.addEventListener("keydown", (e) => {
 
 function getActiveTargetDirs() {
   const targetDirs = [];
-  if (outputDir) targetDirs.push(outputDir);
+  if (outputDir && !isStandaloneKeygenMode()) targetDirs.push(outputDir);
   if (keyPath) {
     const pathStr = keyPath.toString();
     if (pathStr.endsWith(".obk") || pathStr.endsWith(".obp")) {
@@ -518,7 +637,7 @@ document.querySelectorAll(".eye-toggle-btn").forEach((btn) => {
 
 // --- Real-time Password Strength & Match Validation ---
 mainPinInput.addEventListener("input", () => {
-  if (currentMode === "ENCRYPT") {
+  if (currentMode === "ENCRYPT" && !isStandaloneKeygenMode()) {
     checkPasswordStrength(mainPinInput.value);
     checkPasswordMatch();
     checkDeceptionValidation();
@@ -526,7 +645,7 @@ mainPinInput.addEventListener("input", () => {
 });
 
 confirmPinInput.addEventListener("input", () => {
-  if (currentMode === "ENCRYPT") {
+  if (currentMode === "ENCRYPT" && !isStandaloneKeygenMode()) {
     checkPasswordMatch();
   }
 });
@@ -585,7 +704,7 @@ function checkPasswordMatch() {
 }
 
 function checkDeceptionValidation() {
-  const masterPin = mainPinInput.value;
+  const masterPin = isStandaloneKeygenMode() ? "" : mainPinInput.value;
   const d1 = deceptionInput.value;
   const d2 = confirmDeceptionInput.value;
 
@@ -626,6 +745,14 @@ function resetProgressPhases() {
   phaseLine2.className = "phase-line";
 }
 
+function setAllPhasesComplete() {
+  phaseNode1.className = "phase-node complete";
+  phaseLine1.className = "phase-line complete";
+  phaseNode2.className = "phase-node complete";
+  phaseLine2.className = "phase-line complete";
+  phaseNode3.className = "phase-node complete";
+}
+
 listen("crypto-progress", (event) => {
   const currentProgress = event.payload;
 
@@ -639,12 +766,16 @@ listen("crypto-progress", (event) => {
     phaseNode1.className = "phase-node active";
     phaseLine1.className = "phase-line";
     phaseNode2.className = "phase-node";
+    phaseLine2.className = "phase-line";
+    phaseNode3.className = "phase-node";
     if (progressEta) progressEta.textContent = "Phase 1: Synthesizing keys & KEM encapsulation...";
   } else if (currentProgress >= streamStartThreshold && currentProgress < 98) {
     if (streamStartTime === 0) streamStartTime = Date.now();
     phaseNode1.className = "phase-node complete";
     phaseLine1.className = "phase-line active";
     phaseNode2.className = "phase-node active";
+    phaseLine2.className = "phase-line";
+    phaseNode3.className = "phase-node";
 
     const elapsedMs = Math.max(1, Date.now() - streamStartTime);
     const phaseProgress = Math.max(1, currentProgress - streamStartThreshold);
@@ -658,12 +789,14 @@ listen("crypto-progress", (event) => {
 
     if (progressEta) progressEta.textContent = `Phase 2: Streaming AEAD (~${minutes}m ${seconds}s left)`;
   } else if (currentProgress >= 98 && currentProgress < 100) {
+    phaseNode1.className = "phase-node complete";
+    phaseLine1.className = "phase-line complete";
     phaseNode2.className = "phase-node complete";
     phaseLine2.className = "phase-line active";
     phaseNode3.className = "phase-node active";
     if (progressEta) progressEta.textContent = "Phase 3: Verifying tags & committing atomic promotion...";
   } else {
-    phaseNode3.className = "phase-node complete";
+    setAllPhasesComplete();
     if (progressEta) progressEta.textContent = "Completed!";
   }
 });
@@ -674,6 +807,72 @@ const cryptoForm = document.getElementById("crypto-form");
 cryptoForm.addEventListener("submit", async (e) => {
   e.preventDefault();
 
+  const deceptionPasscode = deceptionInput.value;
+  const confirmDeception = confirmDeceptionInput.value;
+  const kem = kemAlgoSelect.value;
+
+  // --- Branch 1: Standalone Keypair Generation Only ---
+  if (isStandaloneKeygenMode()) {
+    if (!keyPath) {
+      statusMsg.textContent = "Please select a Keypair Output Destination folder before generating.";
+      statusMsg.style.color = "#f87171";
+      return;
+    }
+
+    const rawName = keyNameInput.value.trim();
+    if (!rawName || rawName.includes("/") || rawName.includes("\\") || rawName.includes("..")) {
+      statusMsg.textContent = "Error: Please enter a valid Keypair File Prefix without path separators.";
+      statusMsg.style.color = "#f87171";
+      return;
+    }
+
+    if (deceptionPasscode && deceptionPasscode !== confirmDeception) {
+      statusMsg.textContent = "Error: Deception passcodes do not match.";
+      statusMsg.style.color = "#f87171";
+      return;
+    }
+
+    isOperationRunning = true;
+    updateExecutionUI();
+    abortBtn.style.display = "none"; // Keygen completes atomically in a single step
+    resetProgressPhases();
+
+    progressContainer.style.display = "block";
+    progressBar.style.width = "45%";
+    if (progressPercent) progressPercent.textContent = "45%";
+    if (progressEta) progressEta.textContent = "Phase 1: Deriving post-quantum hybrid keypair...";
+
+    statusMsg.textContent = "Generating hybrid ML-KEM + X25519 keypair...";
+    statusMsg.style.color = "var(--patronus-cyan)";
+
+    try {
+      const response = await invoke("generate_keypair_files", {
+        outputDir: keyPath,
+        keyName: rawName,
+        kem: kem,
+        deceptionPasscode: deceptionPasscode,
+      });
+
+      progressBar.style.width = "100%";
+      if (progressPercent) progressPercent.textContent = "100%";
+      if (progressEta) progressEta.textContent = "Completed!";
+      setAllPhasesComplete();
+
+      statusMsg.textContent = `Operation Successful: ${response}`;
+      statusMsg.style.color = "#38bdf8";
+    } catch (error) {
+      statusMsg.textContent = "Error: " + error;
+      statusMsg.style.color = "#f87171";
+      progressContainer.style.display = "none";
+    } finally {
+      isOperationRunning = false;
+      updateExecutionUI();
+      clearCredentials();
+    }
+    return;
+  }
+
+  // --- Branch 2: Standard Vault Encryption / Decryption ---
   if (!targetPath || !outputDir || !keyPath) {
     statusMsg.textContent = "Please select Source, Output Folder, and Key Location before proceeding.";
     statusMsg.style.color = "#f87171";
@@ -689,8 +888,6 @@ cryptoForm.addEventListener("submit", async (e) => {
 
   const mainPin = mainPinInput.value;
   const confirmPin = confirmPinInput.value;
-  const deceptionPasscode = deceptionInput.value;
-  const confirmDeception = confirmDeceptionInput.value;
 
   if (currentMode === "ENCRYPT") {
     if (mainPin !== confirmPin) {
@@ -714,7 +911,6 @@ cryptoForm.addEventListener("submit", async (e) => {
   }
 
   const cipher = cipherAlgoSelect.value;
-  const kem = kemAlgoSelect.value;
   const useExistingPublicKey =
     currentMode === "ENCRYPT" && keyModeSelect.value === "existing_obp";
 

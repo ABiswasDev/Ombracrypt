@@ -258,6 +258,18 @@ html, body {
   border-bottom: 1px solid rgba(56, 189, 248, 0.14);
 }
 
+.step-badge {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--patronus-cyan);
+  background: rgba(0, 240, 255, 0.1);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  border-radius: 6px;
+  padding: 3px 8px;
+  text-shadow: 0 0 8px var(--patronus-glow);
+}
+
 .header-text {
   display: flex;
   flex-direction: column;
@@ -294,9 +306,24 @@ html, body {
   transition: all 0.2s ease;
 }
 
-.path-card:hover {
+.path-card:hover:not(.card-dimmed) {
   border-color: rgba(56, 189, 248, 0.35);
   background: rgba(5, 12, 26, 0.8);
+}
+
+/* Dimmed Card State for Standalone Keypair Generation Mode */
+.path-card.card-dimmed {
+  opacity: 0.38;
+  border-color: rgba(19, 36, 58, 0.4);
+  background: rgba(2, 5, 12, 0.45);
+}
+
+.path-card.card-dimmed .path-readout {
+  cursor: default;
+}
+
+.path-card.card-dimmed .path-readout:hover {
+  border-color: rgba(19, 36, 58, 0.8);
 }
 
 .field-label {
@@ -370,7 +397,7 @@ html, body {
   border-color: var(--patronus-blue);
 }
 
-/* One-Way Sealing Banner */
+/* One-Way Sealing & Keygen Banners */
 .sealing-banner {
   display: flex;
   align-items: center;
@@ -401,6 +428,10 @@ html, body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+}
+
+.settings-group.single-col {
+  grid-template-columns: 1fr;
 }
 
 .credentials-group {
@@ -457,6 +488,11 @@ input, select {
   font-family: var(--font-sans);
   box-sizing: border-box;
   transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+input[type="text"] {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
 }
 
 input[type="password"] {
@@ -666,6 +702,7 @@ select option {
 
 .phase-node.complete .node-dot {
   background: var(--status-ok);
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.5);
 }
 
 .phase-line {
@@ -673,11 +710,17 @@ select option {
   height: 1px;
   margin: 0 10px;
   background: rgba(56, 189, 248, 0.15);
-  transition: background 0.3s ease;
+  transition: background 0.3s ease, box-shadow 0.3s ease;
 }
 
 .phase-line.active {
   background: linear-gradient(90deg, var(--status-ok), var(--patronus-cyan));
+  box-shadow: 0 0 6px rgba(0, 240, 255, 0.35);
+}
+
+.phase-line.complete {
+  background: var(--status-ok);
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.45);
 }
 
 /* Progress Bar */
