@@ -21,7 +21,7 @@
 Ombracrypt is a local-first, zero-escrow post-quantum cryptographic vault engineered to protect files against contemporary interception and "Harvest Now, Decrypt Later" (HNDL) attacks. Operating offline with zero telemetry or key custody, it combines hybrid ML-KEM with X25519 and bounded in-memory AEAD streaming, avoiding plaintext staging. Decoupled vault payloads (.obv), offline private keys (.obk), and public sealing keys (.obp) support user-controlled data sovereignty for cold storage and recipient-based sharing.
 
 <p align="center">
-  <img src="images/Tool_shot.png" alt="Ombracrypt Interface" width="450">
+  <img src="images/Tool_shot.png" alt="Ombracrypt Interface" width="800">
 </p>
 
 ---
