@@ -7,19 +7,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  publish-tauri:
+  create-release:
     permissions:
       contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [macos-latest, ubuntu-22.04, windows-latest]
-
-    runs-on: ${{ matrix.platform }}
+    runs-on: ubuntu-22.04
+    outputs:
+      release_id: ${{ steps.create_release.outputs.release_id }}
+      is_prerelease: ${{ steps.release_gate.outputs.is_prerelease }}
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
       - name: Determine Release Mode
         id: release_gate
         shell: bash
@@ -33,6 +28,38 @@ jobs:
             echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
             echo "Release Mode: PRE-RELEASE (${{ github.ref_name }})"
           fi
+
+      - name: Create Single Draft Release
+        id: create_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_ID=$(gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/releases" \
+            -f tag_name="${{ github.ref_name }}" \
+            -f name="Ombracrypt ${{ github.ref_name }}" \
+            -f body="Automated release build for Windows, macOS, and Linux." \
+            -F draft=true \
+            -F prerelease=${{ steps.release_gate.outputs.is_prerelease }} \
+            --jq '.id')
+          echo "Created Draft Release ID: ${RELEASE_ID}"
+          echo "release_id=${RELEASE_ID}" >> "$GITHUB_OUTPUT"
+
+  publish-tauri:
+    needs: create-release
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-latest, ubuntu-22.04, windows-latest]
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
       - name: Install Linux Dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -51,16 +78,12 @@ jobs:
       - name: Install Frontend Dependencies
         run: npm ci
 
-      - name: Build Tauri App (Auto Draft & Attach)
+      - name: Build Tauri App & Attach to Draft
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: ${{ format('Ombracrypt {0}', github.ref_name) }}
-          releaseBody: 'Automated release build for Windows, macOS, and Linux.'
-          releaseDraft: true
-          prerelease: ${{ steps.release_gate.outputs.is_prerelease == 'true' }}
+          releaseId: ${{ needs.create-release.outputs.release_id }}
 
       - name: Upload Candidate Build Artifacts (Fallback)
         uses: actions/upload-artifact@v4
