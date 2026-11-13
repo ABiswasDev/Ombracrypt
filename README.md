@@ -208,7 +208,7 @@ This cryptographically binds the cleartext header and chunk sequence to every ci
 
 Ombracrypt includes an optional defensive countermeasure for physical coercion scenarios:
 
-* **The Phantom Block:** When generating a keypair, an optional Deception Passcode derives a 32-byte block via Argon2id using an independent salt, which is stored in the `.obk` file. If no passcode is configured, 32 bytes of CSPRNG noise are written.
+* **The Phantom Block:** When generating a keypair alongside single-user vault encryption (`Generate Keys & Encrypt Vault`), an optional Deception Passcode derives a 32-byte block via Argon2id using an independent salt, which is stored in the `.obk` file. If no passcode is configured—or when generating a standalone reusable keypair (`Generate Keypair Only`)—32 bytes of CSPRNG noise are written instead to prevent cross-vault passphrase collisions.
 * **Duress Verification:** During decryption, the entered passphrase is verified in constant time against the Phantom Block.
 * **In-Place Overwrite Attempt:** If the Deception Passcode matches:
   * The target `.obk` file is checked to ensure it is a regular file within valid bounds ($64\text{ B} \le \text{size} \le 8{,}192\text{ B}$) and not a symlink.
@@ -351,9 +351,11 @@ Compiled desktop bundles (`.deb`, `.AppImage`, `.rpm`, `.msi`, `.exe`, `.dmg`) a
 ```text
 ombracrypt/
 ├── .github/
+│   ├── ISSUE_TEMPLATE/                # Bug report issue template
 │   └── workflows/
 │       ├── ci.yml                     # Multi-platform CI backend regression suite
 │       └── release.yml                # Multi-platform release bundle packaging
+├── .vscode/                           # Recommended workspace editor extensions
 ├── docs/
 │   └── QUICKSTART.md                  # User onboarding & key generation guide
 ├── images/                            # Application captures and schematics
@@ -363,10 +365,11 @@ ombracrypt/
 │   ├── main.js                        # IPC event dispatchers, progress telemetry
 │   └── styles.css                     # Ombraveil dark UI styling & typography
 ├── src-tauri/                         # Native Rust Core Engine
+│   ├── .gitignore                     # Rust target & build artifact exclusions
 │   ├── build.rs                       # Tauri native build script
 │   ├── Cargo.lock                     # Locked Rust dependency tree
 │   ├── Cargo.toml                     # Manifest (fips203, x25519-dalek, sha3, argon2)
-│   ├── tauri.conf.json                # 1080x720 window geometry & app metadata
+│   ├── tauri.conf.json                # Resizable 1080x720 window geometry & app metadata
 │   ├── capabilities/
 │   │   └── default.json               # Desktop security policy & IPC permissions
 │   ├── icons/                         # Desktop and mobile application icon sets
@@ -389,6 +392,8 @@ ombracrypt/
 │       └── tests.rs                   # Multi-platform regression & KAT test suite
 ├── tools/
 │   └── xwing-fixture-generator/       # Go / CIRCL reference KAT generator
+├── .gitignore                         # Repository ignore rules
+├── logo.png                           # Project brand mark
 ├── package-lock.json                  # Locked npm dependency tree
 ├── package.json                       # Node workspace & build scripts
 ├── SECURITY.md                        # Vulnerability disclosure policy

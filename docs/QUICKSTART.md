@@ -48,21 +48,23 @@ Use this mode to back up sensitive files to commercial cloud storage (Google Dri
 ### Encryption Procedure
 
 #### Step 1: Configure Cryptographic Engines
-1. Launch Ombracrypt.
+1. Launch Ombracrypt and ensure **Key Handling Mode** is set to **Generate Keys & Encrypt Vault (.obk + .obp)**.
 2. Under **Cipher Algorithm**, select your symmetric AEAD engine:
-   - `XChaCha20-Poly1305` (recommended default; 192-bit extended nonce resilience).
-   - `AES-256-GCM` (hardware acceleration where supported).
-3. Under **KEM Algorithm**, select your hybrid post-quantum encapsulation profile:
-   - **X-Wing (IETF Internet-Draft draft-11):** Hybrid profile (`ML-KEM-768` + `X25519`).
-   - **Cypherpunk:** High-security profile (`ML-KEM-1024` + `X25519`).
+   - `XChaCha20-Poly1305 (256-bit)` (recommended default; 192-bit extended nonce resilience).
+   - `AES-256-GCM (Hardware Accel)` (hardware acceleration where supported).
+3. Under **Hybrid KEM Profile**, select your hybrid post-quantum encapsulation profile:
+   - **X-Wing (ML-KEM-768 + X25519):** Standards-track profile (IETF Internet-Draft draft-11).
+   - **Cypherpunk (ML-KEM-1024 + X25519):** High-security Category 5 profile.
 4. Enter and confirm a strong **Master Password**.
-5. *(Optional)* Expand **Advanced Security Options** to configure a **Deception Passcode** for coercion defense.
+5. *(Optional)* Expand **Advanced Coercion Defense (Duress Trapdoor)** to configure a **Deception Passcode**.
 
-#### Step 2: Select Source Directory & Lock Vault
-1. Click **Select Input Folder to Encrypt** and choose the directory you want to secure.
-2. Confirm the displayed target directory path.
-3. Click **Lock Vault**. Ombracrypt will compress the tree into an in-memory stream, derive chunk keys, and produce authenticated chunks.
-4. Wait for the progress indicator to reach 100%.
+#### Step 2: Select Directories & Lock Vault
+1. Under **Source Location**, click **Select Input Folder to Encrypt** and choose the directory you want to secure.
+2. Under **Vault Destination (.obv)**, click **Select Vault Output Folder** to choose where the encrypted `.obv` vault will be written.
+3. Under **Key Destination (.obk / .obp)**, click **Select Folder to Save Keys (.obk / .obp)** to choose where your keypair will be saved.
+4. Confirm that the storage telemetry banner reports **Storage Verified ✓**.
+5. Click **Lock Vault**. Ombracrypt will stream the directory tree in memory, derive chunk keys, and commit the authenticated `.obv`, `.obk`, and `.obp` files.
+6. Wait for all three progress milestones and the progress bar to reach 100%.
 
 #### Step 3: Key Separation & Cloud Upload
 Upon completion, artifacts are written to their respective configured directories:
@@ -79,12 +81,13 @@ Upon completion, artifacts are written to their respective configured directorie
 ### Decryption Procedure (Restoration)
 
 1. Connect your offline media containing your `.obk` file to your workstation.
-2. Open Ombracrypt and navigate to the **Decrypt Vault** view.
-3. Click **Select Vault File (.obv)** to choose the downloaded `.obv` container.
-4. Click **Select Private Key (.obk)** to choose the corresponding `.obk` file from your offline media.
-5. Enter your **Master Password**.
-6. Click **Unlock Vault**.
-7. The engine authenticates the stream chunk-by-chunk into an isolated staging workspace and atomically publishes the restored folder upon full cryptographic verification.
+2. Open Ombracrypt and switch the top mode capsule to **Decrypt**.
+3. Under **Encrypted Vault File**, click **Select Vault File (.obv)** to choose the downloaded `.obv` container.
+4. Under **Extraction Destination Folder**, click **Select Extraction Output Folder** to choose where the restored folder will be published.
+5. Under **Private Key Location (.obk)**, click **Select Private Key (.obk)** to choose the corresponding `.obk` file from your offline media.
+6. Enter your **Master Password**.
+7. Click **Unlock Vault**.
+8. The engine authenticates the stream chunk-by-chunk into an isolated staging workspace and atomically publishes the restored folder upon full cryptographic verification.
 
 ---
 
@@ -116,14 +119,15 @@ Recipient (Data Steward)                  Sender (Contributor / CI/CD)
 ### Collaborative Workflow Steps
 
 #### 1. Recipient Generates and Publishes Sealing Key
-1. The recipient generates an Ombracrypt keypair.
-2. The recipient securely stores their `.obk` private key offline.
-3. The recipient sends their public key (`team_lead.obp`) to team members, commits it to a Git repository, or uploads it to a CI/CD server.
+1. In **Encrypt** mode, set **Key Handling Mode** to **Generate Keypair Only (.obk + .obp)**.
+2. Choose your **Hybrid KEM Profile** (`X-Wing` or `Cypherpunk`), enter a **Keypair File Prefix** (e.g., `team_lead`), and click **Select Folder to Save Keypair (.obk + .obp)**.
+3. Click **Generate Keypair** to produce `team_lead.obk` and `team_lead.obp`. *(Note: Standalone reusable keypairs do not embed a Master Password or Duress Trapdoor; Master Passwords are set per vault during encryption, and omitting the duress block prevents cross-vault passphrase collisions.)*
+4. The recipient moves `team_lead.obk` to isolated offline storage and sends `team_lead.obp` to team members, commits it to a repository, or uploads it to a CI/CD server.
 
 #### 2. Sender Seals Vault (One-Way Encryption)
-1. The sender opens Ombracrypt and selects the folder to send.
+1. In **Encrypt** mode, click **Select Input Folder to Encrypt** to choose the folder to send, and click **Select Vault Output Folder** for the `.obv` destination.
 2. Under **Key Handling Mode**, select **Seal with Existing Public Key (.obp)**, then click **Select Public Key (.obp)** to choose `team_lead.obp`.
-3. The sender enters the agreed project passphrase and locks the vault.
+3. Select the **Cipher Algorithm**, enter and confirm the agreed project **Master Password**, and click **Lock Vault**.
 4. The resulting `project_data.obv` file is created.
 
 > **One-Way Invariant:** The sender **cannot inspect, read, or decrypt** `project_data.obv` once encryption completes. Only holders of `team_lead.obk` can unlock it.
@@ -145,7 +149,7 @@ The Deception Passcode is a local private-key overwrite countermeasure intended 
 
 ### Mechanism & Behavior
 
-1. **Pre-Configuration:** When locking a vault, define both a **Master Password** and an alternate **Deception Passcode**.
+1. **Pre-Configuration:** When locking a single-user vault using **Generate Keys & Encrypt Vault (.obk + .obp)**, expand **Advanced Coercion Defense (Duress Trapdoor)** and define both a **Master Password** and an alternate **Deception Passcode**. *(Standalone keypairs created via **Generate Keypair Only** omit duress configuration to prevent collisions across multiple vaults.)*
 2. **Duress Invocation:** When forced to open the vault under duress, enter the **Deception Passcode** in the password field instead of the real password.
 3. **Plausible Error Display:** The application displays an authentic, indistinguishable authentication error:  
    `Decryption Failed! Data corruption or mismatched cryptographic key.`
