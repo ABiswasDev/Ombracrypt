@@ -6,7 +6,7 @@ Ombracrypt is currently transitioning from legacy classical builds to post-quant
 
 | Version | Status | Supported | Notes |
 | :--- | :--- | :--- | :--- |
-| **`v2.0.0-beta`** | Current Beta | ✅ | Primary focus for active security testing, audits, and fixes. |
+| **`v2.1.0-beta`** | Current Beta | ✅ | Primary focus for active security testing, audits, and fixes. |
 | **`v1.0.x`** | Legacy | ⚠️ | Critical security fixes only (deprecated architecture). |
 
 ## Reporting a Vulnerability
@@ -29,7 +29,7 @@ To help us triage and resolve the issue quickly, please provide:
 
 1. **Vulnerability Summary:** A clear explanation of the vulnerability and its potential security impact (e.g., unauthorized decapsulation, AEAD chunk truncation, filesystem traversal, duress overwrite bypass).
 2. **Environment Details:**
-   * Ombracrypt exact version / Git commit hash (e.g., `v2.0.0-beta`).
+   * Ombracrypt exact version / Git commit hash (e.g., `v2.1.0-beta`).
    * Operating System and version (Linux distribution, Windows version, or macOS release).
    * Selected KEM profile (X-Wing or Cypherpunk) and symmetric cipher (AES-256-GCM or XChaCha20-Poly1305), if applicable.
 3. **Reproduction Steps:** Minimal proof-of-concept (PoC) code, malformed archive/key samples, or reproduction instructions.

@@ -31,7 +31,7 @@ Ombracrypt is a local-first, zero-escrow post-quantum cryptographic vault engine
 | Track | Version | Status & Deployment Guidance |
 | :--- | :--- | :--- |
 | **Legacy** | `v1` | **Deprecated architecture.** Existing binary installers remain accessible on GitHub Releases for historical access and data recovery. Not recommended for new deployments. |
-| **Beta** | `v2` | **Current architecture under active development on `main`.** The v2.0.0-beta architecture is now available with standalone binary packages under Releases for wider community testing and security auditing following internal validation. |
+| **Beta** | `v2` | **Current architecture under active development on `main`.** The v2.1.0-beta architecture is now available with standalone binary packages under Releases for wider community testing and security auditing following internal validation. |
 
 ---
 
