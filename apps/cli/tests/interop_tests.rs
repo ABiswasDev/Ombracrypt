@@ -307,7 +307,13 @@ fn test_frozen_v2_1_golden_fixture_compatibility() {
         fixture_dir.display()
     );
 
-    let expected_bytes = fs::read(&frozen_plain).unwrap();
+    const EXPECTED_GOLDEN_BYTES: &[u8] =
+        b"Ombracrypt v2.1.0 immutable wire-format compatibility vector\n";
+    let disk_plain = String::from_utf8(fs::read(&frozen_plain).unwrap())
+        .unwrap()
+        .replace("\r\n", "\n");
+    assert_eq!(disk_plain.as_bytes(), EXPECTED_GOLDEN_BYTES);
+    let expected_bytes = EXPECTED_GOLDEN_BYTES.to_vec();
     let (ws, _guard) = create_temp_dir("verify_golden");
     let cli_out = ws.join("cli_from_golden");
     let sealed_dir = ws.join("sealed_with_golden_obp");
