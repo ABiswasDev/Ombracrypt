@@ -756,7 +756,7 @@ fn test_sprint5_decrypt_reader_empty_slice_read_does_not_advance_stream() {
         bytes_read_from_vault: 0,
         vault_body_size: 128,
         reached_final_chunk: false,
-        app: None,
+        progress_cb: None,
         last_percent: 40,
         cancellation_token: None,
     };
@@ -2293,7 +2293,7 @@ fn test_sprint11_deterministic_multi_chunk_cancellation_and_staging_cleanup() {
         bytes_read_from_vault: 0,
         vault_body_size,
         reached_final_chunk: false,
-        app: None,
+        progress_cb: None,
         last_percent: 40,
         cancellation_token: Some(cancel_flag),
     };

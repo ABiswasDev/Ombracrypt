@@ -1,0 +1,26 @@
+[package]
+name = "ombracrypt-cli"
+version = "2.1.0"
+description = "Ombracrypt Post-Quantum Hybrid Cryptographic Vault CLI"
+authors = ["Abhishek Biswas"]
+edition = "2021"
+license = "CAL-1.0"
+repository = "https://github.com/ABiswasDev/Ombracrypt"
+readme = "README.md"
+
+[[bin]]
+name = "ombracrypt"
+path = "src/main.rs"
+
+[dependencies]
+ombracrypt-core = { path = "../../crates/ombracrypt-core" }
+clap = { version = "4", features = ["derive"] }
+colored = "2"
+indicatif = "0.17"
+inquire = "0.7"
+ctrlc = "3.4"
+serde_json = "1"
+zeroize = "1.8.1"
+
+[dev-dependencies]
+rand = "0.8.5"

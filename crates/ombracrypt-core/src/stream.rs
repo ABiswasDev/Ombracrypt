@@ -11,10 +11,10 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tar::{Archive, EntryType};
-use tauri::{AppHandle, Emitter};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::crypto;
+use crate::ProgressCallback;
 
 pub const CHUNK_SIZE: usize = 1024 * 1024; // 1 MiB Streaming Ceiling
 pub const VAULT_MAGIC: &[u8; 5] = b"OMBV\x02";
@@ -36,11 +36,9 @@ pub struct ValidatedHeader {
     pub header_hash: [u8; 32],
 }
 
-pub fn emit_progress(app: Option<&AppHandle>, progress: u8) -> Result<(), String> {
-    if let Some(handle) = app {
-        handle
-            .emit("crypto-progress", progress)
-            .map_err(|e| e.to_string())?;
+pub fn emit_progress(progress_cb: ProgressCallback<'_>, progress: u8) -> Result<(), String> {
+    if let Some(cb) = progress_cb {
+        cb(progress)?;
     }
     Ok(())
 }
@@ -376,7 +374,7 @@ pub struct ChunkedEncryptWriter<'a, W: Write> {
     pub chunk_index: u64,
     pub processed_bytes: u64,
     pub total_expected: u64,
-    pub app: Option<&'a AppHandle>,
+    pub progress_cb: ProgressCallback<'a>,
     pub last_percent: u8,
     pub cancellation_token: Option<Arc<AtomicBool>>,
 }
@@ -445,7 +443,7 @@ impl<'a, W: Write> ChunkedEncryptWriter<'a, W> {
         let ratio = (self.processed_bytes as f64 / self.total_expected.max(1) as f64).min(1.0);
         let progress = 30 + (ratio * 65.0) as u8;
         if progress > self.last_percent {
-            let _ = emit_progress(self.app, progress);
+            let _ = emit_progress(self.progress_cb, progress);
             self.last_percent = progress;
         }
 
@@ -501,7 +499,7 @@ pub struct ChunkedDecryptReader<'a, R: Read> {
     pub bytes_read_from_vault: u64,
     pub vault_body_size: u64,
     pub reached_final_chunk: bool,
-    pub app: Option<&'a AppHandle>,
+    pub progress_cb: ProgressCallback<'a>,
     pub last_percent: u8,
     pub cancellation_token: Option<Arc<AtomicBool>>,
 }
@@ -613,7 +611,7 @@ impl<'a, R: Read> ChunkedDecryptReader<'a, R> {
             (self.bytes_read_from_vault as f64 / self.vault_body_size.max(1) as f64).min(1.0);
         let progress = 40 + (ratio * 55.0) as u8;
         if progress > self.last_percent {
-            let _ = emit_progress(self.app, progress);
+            let _ = emit_progress(self.progress_cb, progress);
             self.last_percent = progress;
         }
 

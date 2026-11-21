@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tar::{Archive, Builder};
-use tauri::AppHandle;
 use zeroize::Zeroizing;
 
 use crate::crypto;
@@ -20,6 +19,7 @@ use crate::stream::{
     build_and_hash_header, emit_progress, extract_tar_archive_safely, parse_and_validate_header,
     ChunkedDecryptReader, ChunkedEncryptWriter, CHUNK_SIZE,
 };
+use crate::ProgressCallback;
 
 pub fn generate_standalone_keypair(
     output_dir: &str,
@@ -79,7 +79,7 @@ pub fn generate_standalone_keypair(
 }
 
 pub fn encrypt_vault(
-    app: &AppHandle,
+    progress_cb: ProgressCallback<'_>,
     target_path: &str,
     vault_output_dir: &str,
     key_location: &str,
@@ -91,7 +91,7 @@ pub fn encrypt_vault(
     cancellation_token: Option<Arc<AtomicBool>>,
 ) -> Result<String, String> {
     encrypt_vault_core(
-        Some(app),
+        progress_cb,
         target_path,
         vault_output_dir,
         key_location,
@@ -105,7 +105,7 @@ pub fn encrypt_vault(
 }
 
 pub fn encrypt_vault_core(
-    app: Option<&AppHandle>,
+    progress_cb: ProgressCallback<'_>,
     target_path: &str,
     vault_output_dir: &str,
     key_location: &str,
@@ -123,7 +123,7 @@ pub fn encrypt_vault_core(
         return Err("Security Error: Deception passcode cannot match Master Password.".to_string());
     }
 
-    emit_progress(app, 5)?;
+    emit_progress(progress_cb, 5)?;
 
     let (cipher_id, nonce_len) = match cipher {
         "xchacha20" => (1u8, 24usize),
@@ -161,7 +161,7 @@ pub fn encrypt_vault_core(
         .saturating_add(check.item_count.saturating_mul(512))
         .max(1024);
 
-    emit_progress(app, 15)?;
+    emit_progress(progress_cb, 15)?;
 
     let (argon_key, salt) = crypto::derive_key(main_pin)?;
 
@@ -232,7 +232,7 @@ pub fn encrypt_vault_core(
         .write_all(&header_bytes)
         .map_err(|e| e.to_string())?;
 
-    emit_progress(app, 30)?;
+    emit_progress(progress_cb, 30)?;
 
     let encrypt_writer = ChunkedEncryptWriter {
         inner: vault_file,
@@ -244,7 +244,7 @@ pub fn encrypt_vault_core(
         chunk_index: 0,
         processed_bytes: 0,
         total_expected: estimated_tar_size,
-        app,
+        progress_cb,
         last_percent: 30,
         cancellation_token: cancellation_token.clone(),
     };
@@ -312,7 +312,7 @@ pub fn encrypt_vault_core(
     commit_guard.disarm();
     stage_guard.disarm();
 
-    let _ = emit_progress(app, 100);
+    let _ = emit_progress(progress_cb, 100);
     if use_existing_public_key {
         Ok(format!(
             "Operation Successful: Vault sealed (.obv) with Public Key [Key ID: {}].",
@@ -327,7 +327,7 @@ pub fn encrypt_vault_core(
 }
 
 pub fn decrypt_vault(
-    app: &AppHandle,
+    progress_cb: ProgressCallback<'_>,
     vault_path: &str,
     key_path: Option<&str>,
     output_dir: &str,
@@ -335,7 +335,7 @@ pub fn decrypt_vault(
     cancellation_token: Option<Arc<AtomicBool>>,
 ) -> Result<String, String> {
     decrypt_vault_core(
-        Some(app),
+        progress_cb,
         vault_path,
         key_path,
         output_dir,
@@ -345,7 +345,7 @@ pub fn decrypt_vault(
 }
 
 pub fn decrypt_vault_core(
-    app: Option<&AppHandle>,
+    progress_cb: ProgressCallback<'_>,
     vault_path: &str,
     key_path: Option<&str>,
     output_dir: &str,
@@ -353,7 +353,7 @@ pub fn decrypt_vault_core(
     cancellation_token: Option<Arc<AtomicBool>>,
 ) -> Result<String, String> {
     decrypt_vault_core_impl(
-        app,
+        progress_cb,
         vault_path,
         key_path,
         output_dir,
@@ -365,7 +365,7 @@ pub fn decrypt_vault_core(
 
 #[cfg(test)]
 pub(crate) fn decrypt_vault_core_for_test<F>(
-    app: Option<&AppHandle>,
+    progress_cb: ProgressCallback<'_>,
     vault_path: &str,
     key_path: Option<&str>,
     output_dir: &str,
@@ -377,7 +377,7 @@ where
     F: FnOnce(&mut TempDirGuard) -> Result<(), (PathBuf, std::io::Error)>,
 {
     decrypt_vault_core_impl(
-        app,
+        progress_cb,
         vault_path,
         key_path,
         output_dir,
@@ -388,7 +388,7 @@ where
 }
 
 fn decrypt_vault_core_impl<F>(
-    app: Option<&AppHandle>,
+    progress_cb: ProgressCallback<'_>,
     vault_path: &str,
     key_path: Option<&str>,
     output_dir: &str,
@@ -399,7 +399,7 @@ fn decrypt_vault_core_impl<F>(
 where
     F: FnOnce(&mut TempDirGuard) -> Result<(), (PathBuf, std::io::Error)>,
 {
-    emit_progress(app, 10)?;
+    emit_progress(progress_cb, 10)?;
 
     let key_path_str = key_path.ok_or("No Private Key (.obk) selected for decryption!")?;
 
@@ -422,7 +422,7 @@ where
         return Err(conflict);
     }
 
-    emit_progress(app, 25)?;
+    emit_progress(progress_cb, 25)?;
 
     let (duress_triggered, ss_opt) = crypto::decapsulate_with_obk(
         header.kem_id,
@@ -445,7 +445,7 @@ where
     )?;
     let final_master_key = crypto::compute_master_key(&argon_key, &ss_bytes, &header.salt)?;
 
-    emit_progress(app, 40)?;
+    emit_progress(progress_cb, 40)?;
 
     let vault_path_obj = Path::new(vault_path);
     let out_dir_obj = Path::new(output_dir);
@@ -475,7 +475,7 @@ where
         bytes_read_from_vault: 0,
         vault_body_size,
         reached_final_chunk: false,
-        app,
+        progress_cb,
         last_percent: 40,
         cancellation_token: cancellation_token.clone(),
     };
@@ -594,7 +594,7 @@ where
         }
     };
 
-    let _ = emit_progress(app, 100);
+    let _ = emit_progress(progress_cb, 100);
     Ok(format!(
         "Operation Successful: Vault authenticated and extracted directly in memory.{cleanup_warning}"
     ))

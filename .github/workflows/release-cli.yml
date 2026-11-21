@@ -1,0 +1,120 @@
+name: 'Publish CLI Releases'
+
+on:
+  push:
+    tags:
+      - 'cli-v*'
+  workflow_dispatch:
+
+jobs:
+  create-cli-release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+    outputs:
+      release_id: ${{ steps.create_release.outputs.release_id }}
+      is_prerelease: ${{ steps.release_gate.outputs.is_prerelease }}
+    steps:
+      - name: Determine CLI Release Mode
+        id: release_gate
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" =~ ^refs/tags/cli-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "CLI Release Mode: STABLE RELEASE (${{ github.ref_name }})"
+          else
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "CLI Release Mode: PRE-RELEASE (${{ github.ref_name }})"
+          fi
+
+      - name: Create Single Draft CLI Release
+        id: create_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_ID=$(gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/releases" \
+            -f tag_name="${{ github.ref_name }}" \
+            -f name="Ombracrypt CLI ${{ github.ref_name }}" \
+            -f body="Automated cross-platform CLI release binaries (Linux x86_64, Windows x86_64, macOS arm64 & x86_64) with SHA-256 checksums." \
+            -F draft=true \
+            -F prerelease=${{ steps.release_gate.outputs.is_prerelease }} \
+            --jq '.id')
+          echo "Created Draft CLI Release ID: ${RELEASE_ID}"
+          echo "release_id=${RELEASE_ID}" >> "$GITHUB_OUTPUT"
+
+  build-and-attach-cli:
+    needs: create-cli-release
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact_suffix: linux-x86_64
+            ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_suffix: windows-x86_64
+            ext: zip
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_suffix: macos-aarch64
+            ext: tar.gz
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_suffix: macos-x86_64
+            ext: tar.gz
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust Stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo Build Artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build CLI Binary (${{ matrix.target }})
+        run: cargo build --release --locked -p ombracrypt-cli --target ${{ matrix.target }}
+
+      - name: Package & Hash Archive (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          ARCHIVE="ombracrypt-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.tar.gz"
+          cp "target/${{ matrix.target }}/release/ombracrypt" dist/ombracrypt
+          cp apps/cli/README.md dist/README.md
+          cp LICENSE dist/LICENSE
+          tar -czf "${ARCHIVE}" -C dist ombracrypt README.md LICENSE
+          sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+
+      - name: Package & Hash Archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $archive = "ombracrypt-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.zip"
+          Copy-Item "target/${{ matrix.target }}/release/ombracrypt.exe" -Destination "dist/ombracrypt.exe"
+          Copy-Item "apps/cli/README.md" -Destination "dist/README.md"
+          Copy-Item "LICENSE" -Destination "dist/LICENSE"
+          Compress-Archive -Path dist/* -DestinationPath $archive
+          $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLower()
+          "$hash  $archive" | Out-File -Encoding ascii -FilePath "$archive.sha256"
+
+      - name: Attach Archive & Checksum to Draft Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          ARCHIVE="ombracrypt-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.${{ matrix.ext }}"
+          gh release upload "${{ github.ref_name }}" "${ARCHIVE}" "${ARCHIVE}.sha256" --clobber
