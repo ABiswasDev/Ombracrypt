@@ -2,7 +2,7 @@ name: Ombracrypt Security & CI Suite
 
 on:
   push:
-    branches: [ "main", "feat/cli-monorepo" ]
+    branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
@@ -25,6 +25,10 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Verify Desktop Frontend JS Syntax
+        if: runner.os == 'Linux'
+        run: node --check src/main.js
 
       - name: Install Tauri v2 Linux Dependencies
         if: runner.os == 'Linux'

@@ -13,6 +13,10 @@ use std::fs;
 use std::path::PathBuf;
 
 /// Generic progress callback decoupled from UI frameworks (Tauri WebView or CLI terminal).
+/// Crate version of the canonical `ombracrypt-core` engine.
+pub const CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Generic progress callback decoupled from UI frameworks (Tauri WebView or CLI terminal).
 pub type ProgressCallback<'a> = Option<&'a (dyn Fn(u8) -> Result<(), String> + Send + Sync)>;
 
 /// Core synchronous aggregation engine for multi-folder staging cleanup.

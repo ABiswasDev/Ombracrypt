@@ -6,12 +6,25 @@ use ombracrypt_core::{fs_guard, pipeline};
 use std::io::{stdin, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use zeroize::{Zeroize, Zeroizing};
+
+fn cli_version() -> &'static str {
+    static VERSION: OnceLock<String> = OnceLock::new();
+    VERSION
+        .get_or_init(|| {
+            format!(
+                "{} (core {} | format OMBV02)",
+                env!("CARGO_PKG_VERSION"),
+                ombracrypt_core::CORE_VERSION
+            )
+        })
+        .as_str()
+}
 
 #[derive(Parser)]
 #[command(name = "ombracrypt")]
-#[command(version = concat!(env!("CARGO_PKG_VERSION"), " (core ", env!("CARGO_PKG_VERSION"), " | format OMBV02)"))]
+#[command(version = cli_version())]
 #[command(
     about = "Offline Post-Quantum Hybrid Cryptographic Vault for the Terminal",
     long_about = "Ombracrypt is a local-first, zero-escrow post-quantum cryptographic vault engineered\n\
@@ -461,15 +474,31 @@ fn run() -> Result<(), String> {
                     Ok(())
                 }
                 Err(e) => {
-                    if cancel_flag.load(Ordering::Relaxed)
-                        || e.contains("aborted by user")
-                        || e.contains("cancelled by user")
-                    {
-                        eprintln!(
-                            "\n{} Operation aborted by user. Atomic staging rollback and artifact removal completed.\n",
-                            "[!]".yellow().bold()
-                        );
-                        Err("Operation aborted by user.".to_string())
+                    let lower = e.to_ascii_lowercase();
+                    let is_cancelled = cancel_flag.load(Ordering::Relaxed)
+                        || lower.contains("aborted by user")
+                        || lower.contains("cancelled by user");
+                    if is_cancelled {
+                        let has_cleanup_warning = lower.contains("warning")
+                            || lower.contains("incomplete")
+                            || lower.contains("rollback")
+                            || lower.contains("failed to remove")
+                            || lower.contains("left behind")
+                            || lower.contains("could not be removed");
+                        if has_cleanup_warning {
+                            eprintln!(
+                                "\n{} Operation aborted by user, but staging cleanup reported incomplete removal:\n   {}\n",
+                                "[!]".yellow().bold(),
+                                e
+                            );
+                            Err(format!("Operation aborted by user ({e})"))
+                        } else {
+                            eprintln!(
+                                "\n{} Operation aborted by user. Best-effort staging rollback completed.\n",
+                                "[!]".yellow().bold()
+                            );
+                            Err("Operation aborted by user.".to_string())
+                        }
                     } else {
                         Err(e)
                     }
@@ -532,15 +561,31 @@ fn run() -> Result<(), String> {
                     Ok(())
                 }
                 Err(e) => {
-                    if cancel_flag.load(Ordering::Relaxed)
-                        || e.contains("aborted by user")
-                        || e.contains("cancelled by user")
-                    {
-                        eprintln!(
-                            "\n{} Operation aborted by user. Atomic staging rollback and artifact removal completed.\n",
-                            "[!]".yellow().bold()
-                        );
-                        Err("Operation aborted by user.".to_string())
+                    let lower = e.to_ascii_lowercase();
+                    let is_cancelled = cancel_flag.load(Ordering::Relaxed)
+                        || lower.contains("aborted by user")
+                        || lower.contains("cancelled by user");
+                    if is_cancelled {
+                        let has_cleanup_warning = lower.contains("warning")
+                            || lower.contains("incomplete")
+                            || lower.contains("rollback")
+                            || lower.contains("failed to remove")
+                            || lower.contains("left behind")
+                            || lower.contains("could not be removed");
+                        if has_cleanup_warning {
+                            eprintln!(
+                                "\n{} Operation aborted by user, but staging cleanup reported incomplete removal:\n   {}\n",
+                                "[!]".yellow().bold(),
+                                e
+                            );
+                            Err(format!("Operation aborted by user ({e})"))
+                        } else {
+                            eprintln!(
+                                "\n{} Operation aborted by user. Best-effort staging rollback completed.\n",
+                                "[!]".yellow().bold()
+                            );
+                            Err("Operation aborted by user.".to_string())
+                        }
                     } else {
                         Err(e)
                     }

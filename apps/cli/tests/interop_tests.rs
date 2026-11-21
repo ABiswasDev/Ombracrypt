@@ -1,8 +1,9 @@
 //! Cross-Application Interoperability & End-to-End CLI Test Suite
 //!
 //! Verifies all four KEM x Cipher combinations (X-Wing / Cypherpunk x XChaCha20 / AES-256-GCM),
-//! standalone keygen + .obp recipient sealing, inspect JSON output, staged cleanup, and
-//! GUI <-> CLI cross-compatibility over the shared `ombracrypt-core` engine.
+//! standalone keygen + .obp recipient sealing, inspect JSON output, staged cleanup,
+//! GUI <-> CLI cross-compatibility over the shared `ombracrypt-core` engine, and immutable
+//! frozen `v2.1.0` golden fixture compatibility.
 
 use ombracrypt_core::fs_guard::TempDirGuard;
 use ombracrypt_core::pipeline::{decrypt_vault_core, encrypt_vault_core};
@@ -30,6 +31,7 @@ fn test_cli_version_banner_reports_workspace_and_core_versions() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains(env!("CARGO_PKG_VERSION")));
+    assert!(stdout.contains(ombracrypt_core::CORE_VERSION));
     assert!(stdout.contains("OMBV02"));
 }
 
@@ -250,4 +252,132 @@ fn test_cli_keygen_public_sealing_inspect_and_clean_commands() {
         .output()
         .unwrap();
     assert!(clean_out.status.success());
+}
+
+#[test]
+fn test_frozen_v2_1_golden_fixture_compatibility() {
+    let bin = env!("CARGO_BIN_EXE_ombracrypt");
+    let fixture_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/desktop_v2");
+    let frozen_obv = fixture_dir.join("golden_v2_1.obv");
+    let frozen_obk = fixture_dir.join("golden_v2_1.obk");
+    let frozen_obp = fixture_dir.join("golden_v2_1.obp");
+    let frozen_plain = fixture_dir.join("expected_plaintext.txt");
+    let golden_password = "GoldenFixturePassword#2026!";
+
+    // One-time opt-in generator (never runs during normal `cargo test`)
+    if std::env::var("OMBRACRYPT_GENERATE_GOLDEN_FIXTURES").as_deref() == Ok("1") {
+        fs::create_dir_all(&fixture_dir).unwrap();
+        let (ws, _guard) = create_temp_dir("gen_golden");
+        let src_dir = ws.join("golden_payload");
+        fs::create_dir_all(&src_dir).unwrap();
+        let plain_bytes = b"Ombracrypt v2.1.0 immutable wire-format compatibility vector\n";
+        fs::write(src_dir.join("vector.txt"), plain_bytes).unwrap();
+        fs::write(&frozen_plain, plain_bytes).unwrap();
+
+        encrypt_vault_core(
+            None,
+            src_dir.to_str().unwrap(),
+            ws.to_str().unwrap(),
+            ws.to_str().unwrap(),
+            false,
+            "xchacha20",
+            "xwing",
+            golden_password,
+            "",
+            None,
+        )
+        .expect("Failed to generate golden v2.1.0 fixtures");
+
+        fs::copy(ws.join("golden_payload.obv"), &frozen_obv).unwrap();
+        fs::copy(ws.join("golden_payload.obk"), &frozen_obk).unwrap();
+        fs::copy(ws.join("golden_payload.obp"), &frozen_obp).unwrap();
+    }
+
+    // Skip cleanly until frozen fixtures are generated and committed
+    if !frozen_obv.exists() {
+        eprintln!(
+            "Skipping frozen v2.1.0 fixture check (run with OMBRACRYPT_GENERATE_GOLDEN_FIXTURES=1 once to freeze fixtures)."
+        );
+        return;
+    }
+
+    assert!(
+        frozen_obk.exists() && frozen_obp.exists() && frozen_plain.exists(),
+        "Incomplete golden fixture set in {}",
+        fixture_dir.display()
+    );
+
+    let expected_bytes = fs::read(&frozen_plain).unwrap();
+    let (ws, _guard) = create_temp_dir("verify_golden");
+    let cli_out = ws.join("cli_from_golden");
+    let sealed_dir = ws.join("sealed_with_golden_obp");
+    let core_out = ws.join("core_from_sealed");
+    for d in [&cli_out, &sealed_dir, &core_out] {
+        fs::create_dir_all(d).unwrap();
+    }
+
+    // 1. Frozen v2.1.0 .obv + .obk -> Current CLI decrypts
+    let dec_out = Command::new(bin)
+        .args([
+            "decrypt",
+            "--target",
+            frozen_obv.to_str().unwrap(),
+            "--key",
+            frozen_obk.to_str().unwrap(),
+            "--output-dir",
+            cli_out.to_str().unwrap(),
+            "--quiet",
+        ])
+        .env("OMBRACRYPT_PASSWORD", golden_password)
+        .output()
+        .unwrap();
+    assert!(
+        dec_out.status.success(),
+        "Current CLI failed to decrypt frozen v2.1.0 vault: {}",
+        String::from_utf8_lossy(&dec_out.stderr)
+    );
+    assert_eq!(
+        fs::read(cli_out.join("golden_v2_1/vector.txt")).unwrap(),
+        expected_bytes
+    );
+
+    // 2. Frozen v2.1.0 .obp -> Current CLI seals -> Core decrypts with frozen .obk
+    let reseal_src = ws.join("reseal_payload");
+    fs::create_dir_all(&reseal_src).unwrap();
+    fs::write(reseal_src.join("vector.txt"), &expected_bytes).unwrap();
+
+    let seal_out = Command::new(bin)
+        .args([
+            "encrypt",
+            "--target",
+            reseal_src.to_str().unwrap(),
+            "--output-dir",
+            sealed_dir.to_str().unwrap(),
+            "--public-key",
+            frozen_obp.to_str().unwrap(),
+            "--quiet",
+        ])
+        .env("OMBRACRYPT_PASSWORD", golden_password)
+        .output()
+        .unwrap();
+    assert!(
+        seal_out.status.success(),
+        "Current CLI failed to seal against frozen v2.1.0 .obp: {}",
+        String::from_utf8_lossy(&seal_out.stderr)
+    );
+
+    decrypt_vault_core(
+        None,
+        sealed_dir.join("reseal_payload.obv").to_str().unwrap(),
+        Some(frozen_obk.to_str().unwrap()),
+        core_out.to_str().unwrap(),
+        golden_password,
+        None,
+    )
+    .expect("Core failed to decrypt vault sealed with frozen v2.1.0 .obp");
+
+    assert_eq!(
+        fs::read(core_out.join("reseal_payload/vector.txt")).unwrap(),
+        expected_bytes
+    );
 }

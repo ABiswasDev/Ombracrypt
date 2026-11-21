@@ -15,10 +15,15 @@ jobs:
       release_id: ${{ steps.create_release.outputs.release_id }}
       is_prerelease: ${{ steps.release_gate.outputs.is_prerelease }}
     steps:
-      - name: Determine CLI Release Mode
+      - name: Validate Tag & Determine CLI Release Mode
         id: release_gate
         shell: bash
         run: |
+          if [[ ! "${{ github.ref }}" =~ ^refs/tags/cli-v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Error: CLI release workflow must run on a valid cli-vX.Y.Z tag (got '${{ github.ref }}')."
+            exit 1
+          fi
+
           if [[ "${{ github.ref }}" =~ ^refs/tags/cli-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
             echo "CLI Release Mode: STABLE RELEASE (${{ github.ref_name }})"
@@ -98,7 +103,11 @@ jobs:
           cp apps/cli/README.md dist/README.md
           cp LICENSE dist/LICENSE
           tar -czf "${ARCHIVE}" -C dist ombracrypt README.md LICENSE
-          sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          else
+            shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          fi
 
       - name: Package & Hash Archive (Windows)
         if: runner.os == 'Windows'
