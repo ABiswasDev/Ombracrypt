@@ -29,15 +29,17 @@ jobs:
 
       - name: Create Single Draft CLI Release
         id: create_release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          CLEAN_VERSION="${GITHUB_REF_NAME#cli-}"
           RELEASE_ID=$(gh api \
             --method POST \
             -H "Accept: application/vnd.github+json" \
             "/repos/${{ github.repository }}/releases" \
             -f tag_name="${{ github.ref_name }}" \
-            -f name="Ombracrypt CLI ${{ github.ref_name }}" \
+            -f name="Ombracrypt CLI ${CLEAN_VERSION}" \
             -f body="Automated cross-platform CLI release binaries (Linux x86_64, Windows x86_64, macOS arm64 & x86_64) with SHA-256 checksums." \
             -F draft=true \
             -F prerelease=${{ steps.release_gate.outputs.is_prerelease }} \
