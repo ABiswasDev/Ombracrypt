@@ -2566,6 +2566,20 @@ dependencies = [
 name = "ombracrypt"
 version = "2.1.0"
 dependencies = [
+ "ombracrypt-core",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "zeroize",
+]
+
+[[package]]
+name = "ombracrypt-core"
+version = "2.1.0"
+dependencies = [
  "aes-gcm",
  "argon2",
  "chacha20poly1305",
@@ -2580,10 +2594,6 @@ dependencies = [
  "sha3",
  "subtle",
  "tar",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
  "windows-sys 0.52.0",
  "x25519-dalek",
  "zeroize",

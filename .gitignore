@@ -36,4 +36,4 @@ src-tauri/gen/
 .env
 .env.*
 Thumbs.db
-**/*.rs.bk
+**/*.rs.bk/target/
