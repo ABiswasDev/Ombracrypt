@@ -18,7 +18,7 @@
 
 ## Executive Summary
 
-Ombracrypt is a local-first, zero-escrow post-quantum cryptographic vault engineered to protect files against contemporary interception and "Harvest Now, Decrypt Later" (HNDL) attacks. Operating offline with zero telemetry or key custody, it combines hybrid ML-KEM with X25519 and bounded in-memory AEAD streaming, avoiding plaintext staging. Decoupled vault payloads (.obv), offline private keys (.obk), and public sealing keys (.obp) support user-controlled data sovereignty for cold storage and recipient-based sharing.
+Ombracrypt is a local-first, zero-escrow post-quantum cryptographic vault engineered to protect files against contemporary interception and "Harvest Now, Decrypt Later" (HNDL) attacks. Operating offline with zero telemetry or key custody, it combines hybrid ML-KEM with X25519 and bounded in-memory AEAD streaming, avoiding plaintext staging. Decoupled vault payloads (`.obv`), offline private keys (`.obk`), and public sealing keys (`.obp`) support user-controlled data sovereignty for cold storage and recipient-based sharing.
 
 <p align="center">
   <img src="images/Tool_shot.png" alt="Ombracrypt Interface" width="800">
@@ -31,7 +31,8 @@ Ombracrypt is a local-first, zero-escrow post-quantum cryptographic vault engine
 | Track | Version | Status & Deployment Guidance |
 | :--- | :--- | :--- |
 | **Legacy** | `v1` | **Deprecated architecture.** Existing binary installers remain accessible on GitHub Releases for historical access and data recovery. Not recommended for new deployments. |
-| **Beta** | `v2` | **Current architecture under active development on `main`.** The v2.1.0-beta architecture is now available with standalone binary packages under Releases for wider community testing and security auditing following internal validation. |
+| **Desktop** | `v2` | **Current architecture on `main`.** Cross-platform desktop installers (`.deb`, `.AppImage`, `.rpm`, `.msi`, `.exe`, `.dmg`) are available under GitHub Releases. |
+| **CLI** | `v2` | **Unified into the `Ombracrypt` workspace (`apps/cli`).** Standalone cross-platform terminal binaries sharing `crates/ombracrypt-core` are available under GitHub Releases, superseding the standalone `Ombracrypt-CLI` repository. |
 
 ---
 
@@ -59,7 +60,7 @@ Ombracrypt maintains no administrative backdoor, recovery phrase, or password re
 
 ## Downloads & Artifact Overview
 
-Downloadable desktop packages are available on [GitHub Releases](https://github.com/ABiswasDev/Ombracrypt/releases):
+Downloadable desktop packages (`v*` tags) are available on [GitHub Releases](https://github.com/ABiswasDev/Ombracrypt/releases):
 
 | Operating System | Package Formats | Architecture & Distribution |
 | :--- | :--- | :--- |
@@ -67,7 +68,15 @@ Downloadable desktop packages are available on [GitHub Releases](https://github.
 | **Windows** | `.msi`, `.exe` | x86_64 (Windows 10, Windows 11) |
 | **macOS** | `.dmg` | Apple Silicon (ARM64, macOS 12+) |
 
-For setup instructions and usage workflows, refer to the [Quickstart Guide](docs/QUICKSTART.md).
+Standalone headless CLI binaries (`cli-v*` tags) with SHA-256 checksums are also published on [GitHub Releases](https://github.com/ABiswasDev/Ombracrypt/releases):
+
+| Operating System | Archive Format | Architecture |
+| :--- | :--- | :--- |
+| **Linux** | `.tar.gz` + `.sha256` | `x86_64-unknown-linux-gnu` |
+| **Windows** | `.zip` + `.sha256` | `x86_64-pc-windows-msvc` |
+| **macOS** | `.tar.gz` + `.sha256` | `aarch64-apple-darwin` (Apple Silicon) & `x86_64-apple-darwin` (Intel) |
+
+For setup instructions and usage workflows, refer to the [Desktop Quickstart Guide](docs/QUICKSTART.md), the [CLI Manual](apps/cli/README.md), and the [CLI Quickstart Guide](apps/cli/docs/QUICKSTART.md).
 
 ### The Three Vault Artifacts
 
@@ -224,7 +233,7 @@ Ombracrypt includes an optional defensive countermeasure for physical coercion s
 
 ## Filesystem Safety & Defensive Architecture
 
-Writing and extracting archives on shared or untrusted storage introduces race conditions and namespace collisions. Ombracrypt addresses these through defensive filesystem guards implemented in `src-tauri/src/fs_guard/`.
+Writing and extracting archives on shared or untrusted storage introduces race conditions and namespace collisions. Ombracrypt addresses these through defensive filesystem guards implemented in `crates/ombracrypt-core/src/fs_guard/`.
 
 ### Staging Lifecycle & Permissions
 * **Restricted Staging Artifacts:** Staged files use a strict 54-byte namespace (`.ombracrypt_part_<32hex>.part`). Private key staging files enforce strict `0600` (owner read/write) permissions on Unix. Extraction directories use a strict 50-byte namespace (`.ombracrypt_stage_<32hex>`) with `0700` (owner read/write/traverse) permissions on Unix. Public keys (`.obp`) and vault archives (`.obv`) inherit standard system umask permissions.
@@ -283,8 +292,7 @@ Untrusted TAR archives inside `.obv` containers pass through defensive boundary 
 The cryptographic implementation and filesystem safety invariants of the Rust backend engine are validated through automated regression test suites executed across Ubuntu 22.04, macOS, and Windows runners via GitHub Actions:
 
 ```bash
-cd src-tauri
-cargo test --release
+cargo test --workspace --release
 ```
 
 Comprehensive regression and Known-Answer Test (KAT) suites run automatically on applicable pushes and pull requests targeting main across Ubuntu, macOS, and Windows via GitHub Actions (Windows omits Unix-specific file permission and symlink test cases). Up-to-date execution status and test run metrics are tracked in the repository's [CI Workflow](https://github.com/ABiswasDev/Ombracrypt/actions/workflows/ci.yml).
@@ -297,6 +305,7 @@ Comprehensive regression and Known-Answer Test (KAT) suites run automatically on
 * **Implicit Rejection Verification:** Asserts that decapsulating corrupted ML-KEM ciphertexts triggers implicit rejection, returning an alternate pseudorandom key rather than failing noisily.
 * **Filesystem Race & Concurrency Tests:** Validates multi-threaded contention using `Arc<Barrier>` across simultaneous file and directory publishers (`atomic_publish_noreplace` and `atomic_publish_dir_noreplace`), asserting that winning publishers commit atomically while losers fail closed without clobbering data.
 * **Sentinel & Stale FD Validation:** Tests active locked directory protection, stale sentinel reclamation, and post-lock file-identity verification (`st_nlink == 0` on Unix and `BY_HANDLE_FILE_INFORMATION` index validation on Windows).
+* **Desktop–CLI Interoperability (`apps/cli/tests/interop_tests.rs`):** Verifies bidirectional vault encryption/decryption, `.obp` public-key sealing, and duress overwrite parity across all four KEM/cipher combinations (`X-Wing`/`Cypherpunk` × `XChaCha20-Poly1305`/`AES-256-GCM`).
 
 > **Audit Notice:** Automated regression tests and Known-Answer Tests confirm specification conformance and internal implementation consistency, but do not substitute for an independent third-party security audit. CI runs validate the native Rust backend engine; they do not perform complete frontend packaging or installer compilation.
 
@@ -331,18 +340,21 @@ Comprehensive regression and Known-Answer Test (KAT) suites run automatically on
 # 1. Clone the repository
 git clone https://github.com/ABiswasDev/Ombracrypt.git
 cd Ombracrypt
-
-# 2. Install reproducible frontend dependencies
-npm ci
-
-# 3. Launch application in desktop development mode
-npm run tauri dev
-
-# 4. Compile optimized standalone installer bundles
-npm run tauri build
 ```
 
-Compiled desktop bundles (`.deb`, `.AppImage`, `.rpm`, `.msi`, `.exe`, `.dmg`) are output to `src-tauri/target/release/bundle/`.
+**Option A — Standalone CLI (Rust toolchain only):**
+```bash
+cargo build --release --locked -p ombracrypt-cli
+```
+The compiled CLI binary is output to `target/release/ombracrypt` (`target\release\ombracrypt.exe` on Windows).
+
+**Option B — Desktop GUI (Node.js + Rust toolchain):**
+```bash
+npm ci
+npm run tauri dev     # Launch in desktop development mode
+npm run tauri build   # Compile standalone installer bundles
+```
+Compiled desktop bundles (`.deb`, `.AppImage`, `.rpm`, `.msi`, `.exe`, `.dmg`) are output to `target/release/bundle/`.
 
 ---
 
@@ -353,49 +365,64 @@ ombracrypt/
 ├── .github/
 │   ├── ISSUE_TEMPLATE/                # Bug report issue template
 │   └── workflows/
-│       ├── ci.yml                     # Multi-platform CI backend regression suite
-│       └── release.yml                # Multi-platform release bundle packaging
+│       ├── ci.yml                     # Multi-OS workspace security & interop test matrix
+│       ├── release.yml                # Desktop GUI release pipeline (v* tags)
+│       └── release-cli.yml            # Standalone CLI release pipeline (cli-v* tags)
 ├── .vscode/                           # Recommended workspace editor extensions
+├── apps/
+│   └── cli/                           # Headless CLI binary (ombracrypt-cli)
+│       ├── Cargo.toml                 # CLI crate manifest (clap, rpassword, ombracrypt-core)
+│       ├── README.md                  # Standalone CLI documentation (bundled in releases)
+│       ├── docs/
+│       │   └── QUICKSTART.md          # CLI command reference & workflow examples
+│       ├── src/
+│       │   └── main.rs                # CLI argument parsing, prompts & JSON telemetry
+│       └── tests/
+│           └── interop_tests.rs       # Bidirectional Desktop <-> CLI interoperability tests
+├── crates/
+│   └── ombracrypt-core/               # Shared Post-Quantum Cryptographic & FS Engine
+│       ├── Cargo.toml                 # Core manifest (fips203, x25519-dalek, sha3, argon2)
+│       ├── tests/
+│       │   └── fixtures/
+│       │       └── xwing_revision11/  # CIRCL v1.6.5 Known-Answer Test fixtures
+│       └── src/
+│           ├── lib.rs                 # Public engine API & zeroizing key wrappers
+│           ├── crypto.rs              # Hybrid KEM (X-Wing & Cypherpunk), Argon2id, HKDF
+│           ├── fs_guard/              # Modular platform facade (Linux, macOS, Windows)
+│           │   ├── mod.rs             # Shared validation, SpaceAssessment, CleanupReport
+│           │   ├── linux.rs           # Linux renameat2 & POSIX lock teardown
+│           │   ├── macos.rs           # macOS renamex_np & POSIX lock teardown
+│           │   ├── windows.rs         # Win32 MoveFileExW & handle-safe teardown
+│           │   └── fallback.rs        # Fail-closed boundary for unsupported platforms
+│           ├── pipeline.rs            # Streaming encryption & decryption controllers
+│           ├── stream.rs              # In-memory chunked AEAD readers/writers & TAR guards
+│           ├── deception.rs           # Duress key scrambling & metadata validation
+│           └── tests.rs               # Multi-platform regression & KAT test suite
 ├── docs/
-│   └── QUICKSTART.md                  # User onboarding & key generation guide
+│   └── QUICKSTART.md                  # Desktop user onboarding & key generation guide
 ├── images/                            # Application captures and schematics
-├── src/                               # Frontend Presentation Layer (Tauri WebView)
+├── src/                               # Desktop Frontend Layer (Tauri WebView)
 │   ├── assets/                        # Static UI assets and icons
 │   ├── index.html                     # Responsive two-column workspace layout
 │   ├── main.js                        # IPC event dispatchers, progress telemetry
 │   └── styles.css                     # Ombraveil dark UI styling & typography
-├── src-tauri/                         # Native Rust Core Engine
-│   ├── .gitignore                     # Rust target & build artifact exclusions
+├── src-tauri/                         # Desktop Tauri Shell (links ombracrypt-core)
 │   ├── build.rs                       # Tauri native build script
-│   ├── Cargo.lock                     # Locked Rust dependency tree
-│   ├── Cargo.toml                     # Manifest (fips203, x25519-dalek, sha3, argon2)
-│   ├── tauri.conf.json                # Resizable 1080x720 window geometry & app metadata
+│   ├── Cargo.toml                     # Desktop shell manifest
+│   ├── tauri.conf.json                # Window geometry & bundle metadata
 │   ├── capabilities/
 │   │   └── default.json               # Desktop security policy & IPC permissions
-│   ├── icons/                         # Desktop and mobile application icon sets
-│   ├── tests/
-│   │   └── fixtures/
-│   │       └── xwing_revision11/      # CIRCL v1.6.5 Known-Answer Test fixtures
+│   ├── icons/                         # Application icon sets
 │   └── src/
 │       ├── main.rs                    # Desktop application entry point
-│       ├── lib.rs                     # Tauri command handlers & application state
-│       ├── crypto.rs                  # Hybrid KEM (X-Wing & Cypherpunk), Argon2id, HKDF
-│       ├── fs_guard/                  # Modular platform facade (Linux, macOS, Windows)
-│       │   ├── mod.rs                 # Shared validation, SpaceAssessment, CleanupReport
-│       │   ├── linux.rs               # Linux renameat2 & POSIX lock teardown
-│       │   ├── macos.rs               # macOS renamex_np & POSIX lock teardown
-│       │   ├── windows.rs             # Win32 MoveFileExW & handle-safe teardown
-│       │   └── fallback.rs            # Fail-closed security boundary for unsupported platforms
-│       ├── pipeline.rs                # Streaming encryption & decryption controllers
-│       ├── stream.rs                  # In-memory chunked AEAD readers/writers & TAR guards
-│       ├── deception.rs               # Duress key scrambling & metadata validation
-│       └── tests.rs                   # Multi-platform regression & KAT test suite
+│       └── lib.rs                     # Thin Tauri IPC command adapters
 ├── tools/
 │   └── xwing-fixture-generator/       # Go / CIRCL reference KAT generator
-├── .gitignore                         # Repository ignore rules
+├── Cargo.lock                         # Unified workspace dependency lockfile
+├── Cargo.toml                         # Root Cargo workspace manifest
 ├── logo.png                           # Project brand mark
 ├── package-lock.json                  # Locked npm dependency tree
-├── package.json                       # Node workspace & build scripts
+├── package.json                       # Node scripts for Tauri desktop builds
 ├── SECURITY.md                        # Vulnerability disclosure policy
 └── LICENSE                            # Cryptographic Autonomy License 1.0
 ```
