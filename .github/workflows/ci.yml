@@ -2,7 +2,7 @@ name: Ombracrypt Security & CI Suite
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "feat/cli-monorepo" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
@@ -15,16 +15,12 @@ env:
 
 jobs:
   rust-security-suite:
-    name: Security & Regression Suite (${{ matrix.os }})
+    name: Workspace Security & Interop Suite (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, windows-latest, macos-latest]
-
-    defaults:
-      run:
-        working-directory: ./src-tauri
 
     steps:
       - name: Checkout Repository
@@ -50,11 +46,9 @@ jobs:
 
       - name: Cache Cargo Build Artifacts
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "src-tauri -> target"
 
-      - name: Verify Compilation & Warnings
-        run: cargo check --all-targets
+      - name: Verify Workspace Compilation & Warnings
+        run: cargo check --workspace --all-targets
 
-      - name: Run Security & Conformance Suite
-        run: cargo test --release -- --nocapture
+      - name: Run Core & CLI Interop Security Suite
+        run: cargo test --workspace --release -- --nocapture
