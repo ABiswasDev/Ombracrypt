@@ -97,9 +97,12 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
+          set -euo pipefail
+          BIN_PATH="target/${{ matrix.target }}/release/ombracrypt"
+          test -x "${BIN_PATH}"
           mkdir -p dist
           ARCHIVE="ombracrypt-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.tar.gz"
-          cp "target/${{ matrix.target }}/release/ombracrypt" dist/ombracrypt
+          cp "${BIN_PATH}" dist/ombracrypt
           cp apps/cli/README.md dist/README.md
           cp LICENSE dist/LICENSE
           tar -czf "${ARCHIVE}" -C dist ombracrypt README.md LICENSE
@@ -108,19 +111,31 @@ jobs:
           else
             shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
           fi
+          test -s "${ARCHIVE}"
+          test -s "${ARCHIVE}.sha256"
 
       - name: Package & Hash Archive (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          $binPath = "target/${{ matrix.target }}/release/ombracrypt.exe"
+          if (-not (Test-Path $binPath)) {
+            Write-Error "Compiled CLI binary not found at $binPath"
+            exit 1
+          }
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           $archive = "ombracrypt-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.zip"
-          Copy-Item "target/${{ matrix.target }}/release/ombracrypt.exe" -Destination "dist/ombracrypt.exe"
+          Copy-Item $binPath -Destination "dist/ombracrypt.exe"
           Copy-Item "apps/cli/README.md" -Destination "dist/README.md"
           Copy-Item "LICENSE" -Destination "dist/LICENSE"
           Compress-Archive -Path dist/* -DestinationPath $archive
           $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLower()
           "$hash  $archive" | Out-File -Encoding ascii -FilePath "$archive.sha256"
+          if (-not (Test-Path $archive) -or -not (Test-Path "$archive.sha256")) {
+            Write-Error "Failed to generate release archive or SHA-256 checksum."
+            exit 1
+          }
 
       - name: Attach Archive & Checksum to Draft Release
         env:

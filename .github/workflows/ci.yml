@@ -26,9 +26,18 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Verify Desktop Frontend JS Syntax
+      - name: Setup Node.js & Validate Frontend Lockfile
         if: runner.os == 'Linux'
-        run: node --check src/main.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Frontend Dependencies & Check JS Syntax
+        if: runner.os == 'Linux'
+        run: |
+          npm ci
+          node --check src/main.js
 
       - name: Install Tauri v2 Linux Dependencies
         if: runner.os == 'Linux'

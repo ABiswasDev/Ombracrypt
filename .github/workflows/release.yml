@@ -97,6 +97,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          set -euo pipefail
           shopt -s nullglob
           mkdir -p dist-checksums
           files=(
@@ -105,6 +106,10 @@ jobs:
             target/release/bundle/rpm/*.rpm
             target/release/bundle/dmg/*.dmg
           )
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "Error: No Desktop installer bundles found for ${{ matrix.platform }}."
+            exit 1
+          fi
           for f in "${files[@]}"; do
             base="$(basename "$f")"
             cp "$f" "dist-checksums/$base"
@@ -113,6 +118,7 @@ jobs:
             else
               (cd dist-checksums && shasum -a 256 "$base" > "$base.sha256")
             fi
+            test -s "dist-checksums/$base.sha256"
             gh release upload "${{ github.ref_name }}" "dist-checksums/$base.sha256" --clobber
           done
 
@@ -122,19 +128,30 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force -Path dist-checksums | Out-Null
           $patterns = @(
             "target/release/bundle/msi/*.msi",
             "target/release/bundle/nsis/*.exe"
           )
+          $bundles = @()
           foreach ($pattern in $patterns) {
-            Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue | ForEach-Object {
-              $name = $_.Name
-              $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLower()
-              $shaFile = "dist-checksums/$name.sha256"
-              "$hash  $name" | Out-File -Encoding ascii -FilePath $shaFile
-              gh release upload "${{ github.ref_name }}" $shaFile --clobber
+            $bundles += Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue
+          }
+          if ($bundles.Count -eq 0) {
+            Write-Error "No Windows installer bundles (.msi or .exe) were produced."
+            exit 1
+          }
+          foreach ($bundle in $bundles) {
+            $name = $bundle.Name
+            $hash = (Get-FileHash -Algorithm SHA256 $bundle.FullName).Hash.ToLower()
+            $shaFile = "dist-checksums/$name.sha256"
+            "$hash  $name" | Out-File -Encoding ascii -FilePath $shaFile
+            if (-not (Test-Path $shaFile) -or (Get-Item $shaFile).Length -eq 0) {
+              Write-Error "Failed to generate non-empty checksum file: $shaFile"
+              exit 1
             }
+            gh release upload "${{ github.ref_name }}" $shaFile --clobber
           }
 
       - name: Upload Candidate Build Artifacts (Fallback)
@@ -148,4 +165,4 @@ jobs:
             target/release/bundle/msi/*.msi
             target/release/bundle/nsis/*.exe
             target/release/bundle/dmg/*.dmg
-          if-no-files-found: warn
+          if-no-files-found: error

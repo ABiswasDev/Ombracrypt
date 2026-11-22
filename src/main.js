@@ -446,6 +446,8 @@ selectKeyBtn.addEventListener("click", async () => {
 
 // --- Monotonic Request-Sequenced Pre-Flight Space Check ---
 async function runPreFlightSpaceCheck() {
+  if (isOperationRunning) return;
+
   if (isStandaloneKeygenMode()) {
     if (!keyPath) {
       spaceTelemetryBox.style.display = "none";
@@ -484,7 +486,7 @@ async function runPreFlightSpaceCheck() {
       keyDirOrFile: capturedKey,
     });
 
-    if (requestId !== preflightRequestId) return;
+    if (requestId !== preflightRequestId || isOperationRunning) return;
 
     if (!report.sufficient) {
       spaceTelemetryText.textContent = `Insufficient Space! ${report.summary}`;
@@ -506,7 +508,7 @@ async function runPreFlightSpaceCheck() {
       storageCheckPassed = true;
     }
   } catch (err) {
-    if (requestId !== preflightRequestId) return;
+    if (requestId !== preflightRequestId || isOperationRunning) return;
     spaceTelemetryText.textContent = `Check Error: ${err}`;
     spaceTelemetryBox.className = "telemetry-box telemetry-error";
     actionBtn.disabled = true;
@@ -518,7 +520,7 @@ async function runPreFlightSpaceCheck() {
 abortBtn.addEventListener("click", async () => {
   if (!isOperationRunning) return;
   try {
-    statusMsg.textContent = "Canceling operation and purging staging artifacts...";
+    statusMsg.textContent = "Cancellation requested. Staging cleanup will run as the operation stops.";
     statusMsg.style.color = "#f87171";
     abortBtn.disabled = true;
     await invoke("cancel_current_operation");
@@ -818,27 +820,35 @@ const cryptoForm = document.getElementById("crypto-form");
 
 cryptoForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-
-  const deceptionPasscode = deceptionInput.value;
-  const confirmDeception = confirmDeceptionInput.value;
-  const kem = kemAlgoSelect.value;
+  if (isOperationRunning) return;
 
   // --- Branch 1: Standalone Keypair Generation Only (Duress Trapdoor disabled -> writes 32B CSPRNG noise) ---
   if (isStandaloneKeygenMode()) {
-    if (!keyPath) {
+    const keygenConfig = Object.freeze({
+      outputDir: keyPath,
+      keyName: keyNameInput.value.trim(),
+      kem: kemAlgoSelect.value,
+    });
+
+    if (!keygenConfig.outputDir) {
       statusMsg.textContent = "Please select a Keypair Output Destination folder before generating.";
       statusMsg.style.color = "#f87171";
       return;
     }
 
-    const rawName = keyNameInput.value.trim();
-    if (!rawName || rawName.includes("/") || rawName.includes("\\") || rawName.includes("..")) {
+    if (
+      !keygenConfig.keyName ||
+      keygenConfig.keyName.includes("/") ||
+      keygenConfig.keyName.includes("\\") ||
+      keygenConfig.keyName.includes("..")
+    ) {
       statusMsg.textContent = "Error: Please enter a valid Keypair File Prefix without path separators.";
       statusMsg.style.color = "#f87171";
       return;
     }
 
     isOperationRunning = true;
+    preflightRequestId++;
     updateExecutionUI();
     abortBtn.style.display = "none"; // Keygen completes atomically in a single step
     resetProgressPhases();
@@ -853,9 +863,9 @@ cryptoForm.addEventListener("submit", async (e) => {
 
     try {
       const response = await invoke("generate_keypair_files", {
-        outputDir: keyPath,
-        keyName: rawName,
-        kem: kem,
+        outputDir: keygenConfig.outputDir,
+        keyName: keygenConfig.keyName,
+        kem: keygenConfig.kem,
         deceptionPasscode: "",
       });
 
@@ -879,36 +889,43 @@ cryptoForm.addEventListener("submit", async (e) => {
   }
 
   // --- Branch 2: Standard Vault Encryption / Decryption ---
-  if (!targetPath || !outputDir || !keyPath) {
+  // Capture immutable configuration synchronously before any await
+  const opConfig = Object.freeze({
+    mode: currentMode,
+    keyMode: keyModeSelect.value,
+    targetPath: targetPath,
+    outputDir: outputDir,
+    keyPath: keyPath,
+    cipher: cipherAlgoSelect.value,
+    kem: kemAlgoSelect.value,
+    useExistingPublicKey:
+      currentMode === "ENCRYPT" && keyModeSelect.value === "existing_obp",
+    mainPin: mainPinInput.value,
+    confirmPin: confirmPinInput.value,
+    deceptionPasscode: deceptionInput.value,
+    confirmDeception: confirmDeceptionInput.value,
+  });
+
+  if (!opConfig.targetPath || !opConfig.outputDir || !opConfig.keyPath) {
     statusMsg.textContent = "Please select Source, Output Folder, and Key Location before proceeding.";
     statusMsg.style.color = "#f87171";
     return;
   }
 
-  await runPreFlightSpaceCheck();
-  if (!storageCheckPassed) {
-    statusMsg.textContent = "Cannot proceed: Please resolve storage or path conflict errors above.";
-    statusMsg.style.color = "#f87171";
-    return;
-  }
-
-  const mainPin = mainPinInput.value;
-  const confirmPin = confirmPinInput.value;
-
-  if (currentMode === "ENCRYPT") {
-    if (mainPin !== confirmPin) {
+  if (opConfig.mode === "ENCRYPT") {
+    if (opConfig.mainPin !== opConfig.confirmPin) {
       statusMsg.textContent = "Error: Master Passwords do not match.";
       statusMsg.style.color = "#f87171";
       return;
     }
 
-    if (keyModeSelect.value === "generate" && deceptionPasscode) {
-      if (deceptionPasscode === mainPin) {
+    if (opConfig.keyMode === "generate" && opConfig.deceptionPasscode) {
+      if (opConfig.deceptionPasscode === opConfig.mainPin) {
         statusMsg.textContent = "Error: Deception passcode cannot match Master Password.";
         statusMsg.style.color = "#f87171";
         return;
       }
-      if (deceptionPasscode !== confirmDeception) {
+      if (opConfig.deceptionPasscode !== opConfig.confirmDeception) {
         statusMsg.textContent = "Error: Deception passcodes do not match.";
         statusMsg.style.color = "#f87171";
         return;
@@ -916,45 +933,100 @@ cryptoForm.addEventListener("submit", async (e) => {
     }
   }
 
-  const cipher = cipherAlgoSelect.value;
-  const useExistingPublicKey =
-    currentMode === "ENCRYPT" && keyModeSelect.value === "existing_obp";
-
+  // Lock UI immediately before the first await to enforce single-flight execution
   isOperationRunning = true;
+  preflightRequestId++;
   streamStartTime = 0;
   updateExecutionUI();
-  resetProgressPhases();
+  abortBtn.style.display = "none"; // Preflight runs before cryptographic execution
 
-  progressContainer.style.display = "block";
-  progressBar.style.width = "0%";
-  if (progressPercent) progressPercent.textContent = "0%";
-  if (progressEta) progressEta.textContent = "Phase 1: Initializing pipeline...";
-
-  statusMsg.textContent = "Executing in-memory cryptographic streaming. Do not close the application.";
-  statusMsg.style.color = "var(--patronus-cyan)";
+  let shouldClearCredentials = false;
+  let preflightBlocked = false;
 
   try {
+    spaceTelemetryBox.style.display = "block";
+    spaceTelemetryText.textContent = "Verifying storage & path safety...";
+    spaceTelemetryBox.className = "telemetry-box";
+
+    const report = await invoke("inspect_path_space", {
+      mode: opConfig.mode,
+      sourcePath: opConfig.targetPath,
+      outputDir: opConfig.outputDir,
+      keyDirOrFile: opConfig.keyPath,
+    });
+
+    if (!report.sufficient) {
+      spaceTelemetryText.textContent = `Insufficient Space! ${report.summary}`;
+      spaceTelemetryBox.className = "telemetry-box telemetry-error";
+      storageCheckPassed = false;
+      preflightBlocked = true;
+      statusMsg.textContent = "Cannot proceed: Please resolve storage or path conflict errors above.";
+      statusMsg.style.color = "#f87171";
+      return;
+    } else if (report.conflict_error) {
+      spaceTelemetryText.textContent = `Path Conflict: ${report.conflict_error}`;
+      spaceTelemetryBox.className = "telemetry-box telemetry-error";
+      storageCheckPassed = false;
+      preflightBlocked = true;
+      statusMsg.textContent = "Cannot proceed: Please resolve storage or path conflict errors above.";
+      statusMsg.style.color = "#f87171";
+      return;
+    } else {
+      const fpBadge = report.key_fingerprint
+        ? ` | Key ID: ${report.key_fingerprint}`
+        : "";
+      spaceTelemetryText.textContent = `Storage Verified ✓ (${report.summary}${fpBadge})`;
+      spaceTelemetryBox.className = "telemetry-box telemetry-ok";
+      storageCheckPassed = true;
+    }
+
+    shouldClearCredentials = true;
+    abortBtn.style.display = "block";
+    abortBtn.disabled = false;
+    resetProgressPhases();
+
+    progressContainer.style.display = "block";
+    progressBar.style.width = "0%";
+    if (progressPercent) progressPercent.textContent = "0%";
+    if (progressEta) progressEta.textContent = "Phase 1: Initializing pipeline...";
+
+    statusMsg.textContent = "Executing in-memory cryptographic streaming. Do not close the application.";
+    statusMsg.style.color = "var(--patronus-cyan)";
+
     const response = await invoke("process_cryptography", {
-      mode: currentMode,
-      targetPath: targetPath,
-      outputDir: outputDir,
-      keyPath: keyPath,
-      useExistingPublicKey: useExistingPublicKey,
-      cipher: cipher,
-      kem: kem,
-      mainPin: mainPin,
-      deceptionPasscode: deceptionPasscode,
+      mode: opConfig.mode,
+      targetPath: opConfig.targetPath,
+      outputDir: opConfig.outputDir,
+      keyPath: opConfig.keyPath,
+      useExistingPublicKey: opConfig.useExistingPublicKey,
+      cipher: opConfig.cipher,
+      kem: opConfig.kem,
+      mainPin: opConfig.mainPin,
+      deceptionPasscode: opConfig.deceptionPasscode,
     });
 
     statusMsg.textContent = response;
     statusMsg.style.color = "#38bdf8";
   } catch (error) {
-    statusMsg.textContent = "Error: " + error;
+    if (!shouldClearCredentials) {
+      spaceTelemetryText.textContent = `Check Error: ${error}`;
+      spaceTelemetryBox.className = "telemetry-box telemetry-error";
+      storageCheckPassed = false;
+      preflightBlocked = true;
+      statusMsg.textContent = "Cannot proceed: Please resolve storage or path conflict errors above.";
+    } else {
+      statusMsg.textContent = "Error: " + error;
+      progressContainer.style.display = "none";
+    }
     statusMsg.style.color = "#f87171";
-    progressContainer.style.display = "none";
   } finally {
     isOperationRunning = false;
     updateExecutionUI();
-    clearCredentials();
+    if (preflightBlocked) {
+      actionBtn.disabled = true;
+    }
+    if (shouldClearCredentials) {
+      clearCredentials();
+    }
   }
 });

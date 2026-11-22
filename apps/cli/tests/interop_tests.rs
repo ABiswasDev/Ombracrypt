@@ -264,46 +264,9 @@ fn test_frozen_v2_1_golden_fixture_compatibility() {
     let frozen_plain = fixture_dir.join("expected_plaintext.txt");
     let golden_password = "GoldenFixturePassword#2026!";
 
-    // One-time opt-in generator (never runs during normal `cargo test`)
-    if std::env::var("OMBRACRYPT_GENERATE_GOLDEN_FIXTURES").as_deref() == Ok("1") {
-        fs::create_dir_all(&fixture_dir).unwrap();
-        let (ws, _guard) = create_temp_dir("gen_golden");
-        let src_dir = ws.join("golden_payload");
-        fs::create_dir_all(&src_dir).unwrap();
-        let plain_bytes = b"Ombracrypt v2.1.0 immutable wire-format compatibility vector\n";
-        fs::write(src_dir.join("vector.txt"), plain_bytes).unwrap();
-        fs::write(&frozen_plain, plain_bytes).unwrap();
-
-        encrypt_vault_core(
-            None,
-            src_dir.to_str().unwrap(),
-            ws.to_str().unwrap(),
-            ws.to_str().unwrap(),
-            false,
-            "xchacha20",
-            "xwing",
-            golden_password,
-            "",
-            None,
-        )
-        .expect("Failed to generate golden v2.1.0 fixtures");
-
-        fs::copy(ws.join("golden_payload.obv"), &frozen_obv).unwrap();
-        fs::copy(ws.join("golden_payload.obk"), &frozen_obk).unwrap();
-        fs::copy(ws.join("golden_payload.obp"), &frozen_obp).unwrap();
-    }
-
-    // Skip cleanly until frozen fixtures are generated and committed
-    if !frozen_obv.exists() {
-        eprintln!(
-            "Skipping frozen v2.1.0 fixture check (run with OMBRACRYPT_GENERATE_GOLDEN_FIXTURES=1 once to freeze fixtures)."
-        );
-        return;
-    }
-
     assert!(
-        frozen_obk.exists() && frozen_obp.exists() && frozen_plain.exists(),
-        "Incomplete golden fixture set in {}",
+        frozen_obv.exists() && frozen_obk.exists() && frozen_obp.exists() && frozen_plain.exists(),
+        "Missing committed frozen v2.1.0 golden fixture(s) in {}. Historical compatibility fixtures are required and must not be skipped.",
         fixture_dir.display()
     );
 
@@ -314,6 +277,7 @@ fn test_frozen_v2_1_golden_fixture_compatibility() {
         .replace("\r\n", "\n");
     assert_eq!(disk_plain.as_bytes(), EXPECTED_GOLDEN_BYTES);
     let expected_bytes = EXPECTED_GOLDEN_BYTES.to_vec();
+
     let (ws, _guard) = create_temp_dir("verify_golden");
     let cli_out = ws.join("cli_from_golden");
     let sealed_dir = ws.join("sealed_with_golden_obp");
