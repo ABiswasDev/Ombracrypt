@@ -55,6 +55,7 @@ Ombracrypt maintains no administrative backdoor, recovery phrase, or password re
 * **Interactive Duress Response:** An optional deception passcode triggers an in-place CSPRNG overwrite attempt against the target `.obk` private key file on disk, enforcing `st_nlink > 1` rejection and returning a generic authentication failure message.
 * **Defensive Filesystem Architecture:** Enforces pre-flight storage allocation checks, canonical path collision guards, advisory sentinel file locks, best-effort transactional rollback, and defensive TAR parsing limits.
 * **Offline & Network-Independent:** Operates without network dependencies, external APIs, cloud accounts, or diagnostic telemetry beacons.
+* **Scoped Staging Hygiene & Recovery:** Provides on-demand cleanup for abandoned staging artifacts via the Desktop Maintenance modal and `ombracrypt clean`, skipping active locked operations and symlinks while reporting any incomplete removals rather than silently claiming success.
 
 ---
 
