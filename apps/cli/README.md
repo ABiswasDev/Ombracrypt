@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/banner.png" alt="Ombracrypt Banner" width="800">
+  <img src="https://raw.githubusercontent.com/ABiswasDev/Ombracrypt/main/images/banner.png" alt="Ombracrypt Banner" width="800">
 </p>
 
 <h1 align="center">Ombracrypt CLI</h1>
@@ -11,73 +11,80 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-2d2d2d?style=for-the-badge" alt="Platform">
   <img src="https://img.shields.io/badge/Security-Post--Quantum%20Hybrid%20KEM-blue?style=for-the-badge" alt="Security">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-CAL--1.0-28a745?style=for-the-badge" alt="License"></a>
+  <a href="https://github.com/ABiswasDev/Ombracrypt/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-CAL--1.0-28a745?style=for-the-badge" alt="License"></a>
 </p>
-
 
 ---
 
 ## Executive Summary
 
-**Ombracrypt CLI** is a local-first, zero-escrow post-quantum cryptographic vault engineered for terminal environments, automation scripts, and headless servers. It protects directory archives against contemporary interception and "Harvest Now, Decrypt Later" (HNDL) quantum attacks. 
+**Ombracrypt CLI** (`apps/cli` in the [Ombracrypt](https://github.com/ABiswasDev/Ombracrypt) workspace) is a local-first, zero-escrow post-quantum cryptographic vault engineered for terminal environments, automation scripts, and headless servers. It protects directory archives against contemporary interception and "Harvest Now, Decrypt Later" (HNDL) quantum attacks.
 
-Operating offline with **zero telemetry, no cloud dependencies, and zero key custody**, Ombracrypt CLI maintains **100% bit-for-bit wire-format parity** with the [Ombracrypt Desktop Application](https://github.com/ABiswasDev/Ombracrypt). Vaults (`.obv`) and keys (`.obp`/`.obk`) created in the CLI can be authenticated and extracted in the GUI, and vice versa.
+Operating offline with **zero telemetry, no cloud dependencies, and zero key custody**, Ombracrypt Desktop and Ombracrypt CLI share the canonical `ombracrypt-core` cryptographic and filesystem engine and `OMBV02` container format. Cross-application compatibility for vaults (`.obv`) and keys (`.obp`/`.obk`) is verified through shared-core interoperability tests (`apps/cli/tests/interop_tests.rs`) and frozen `v2.1.0` compatibility fixtures.
 
 ---
- 
+
 ## Key Architectural Capabilities
 
 * **Dual-Profile Post-Quantum Hybrid KEM:**
-  * **Profile 1: X-Wing (Default):** Combines NIST FIPS 203 ML-KEM-768 with classical RFC 7748 X25519 using official IETF draft domain separators (`\.//^\`), SHAKE256 seed expansion, and SHA3-256 combiners.
-  * **Profile 2: Cypherpunk:** High-security profile combining NIST FIPS 203 ML-KEM-1024 with classical X25519.
-* **Folder-Centric In-Memory Streaming:** Streams directory trees directly through bounded in-process buffers in chunks up to $1\text{ MiB}$. Eliminates unencrypted intermediate TAR staging archives on disk during encryption.
+  * **Profile 1: X-Wing (Default):** Combines NIST FIPS 203 ML-KEM-768 with classical RFC 7748 X25519 using the IETF draft (`draft-connolly-cfrg-xwing-kem-11`) domain separator (`\.//^\`), SHAKE256 seed expansion, and SHA3-256 combiner.
+  * **Profile 2: Cypherpunk:** Custom non-standard high-security profile combining NIST FIPS 203 ML-KEM-1024 with classical X25519.
+* **Folder-Centric In-Memory Encryption Streaming:** Streams directory trees directly through bounded in-process buffers in chunks up to 1&nbsp;MiB, eliminating unencrypted intermediate TAR archives on disk during encryption.
 * **Cryptographic Artifact Separation:**
-  * `.obv` **(Encrypted Vault):** Authenticated ciphertext stream bound to header metadata via Additional Authenticated Data (AAD).
-* `.obk` **(Private Decapsulation Key):** Offline decapsulation key generated with `0600` owner-only permissions.
-    * **X-Wing profile:** Exactly **86 bytes** (5 B magic + 1 B kem_id + 16 B salt + 32 B seed + 32 B phantom block).
-    * **Cypherpunk profile:** Exactly **3,254 bytes** (5 B magic + 1 B kem_id + 16 B salt + 3,168 B ML-KEM-1024 d<sub>k</sub> + 32 B X25519 s<sub>k</sub> + 32 B phantom block).
-  * `.obp` **(Public Sealing Key):** Reusable public key allowing one-way vault encryption for individual or group recipients without granting decryption rights (1,222 bytes for `xwing`, 1,606 bytes for `cypherpunk`).
-* **Cooperative Signal Cancellation & Atomic Rollback:** Intercepts operating system termination signals non-blockingly via `ctrlc` and an atomic cancellation barrier.
-  * **Unix (Linux/macOS):** Handles `SIGINT` (Ctrl+C), `SIGTERM`, and `SIGHUP` via `ctrlc`'s `termination` feature.
-  * **Windows:** Handles Console Control Events (`CTRL_C_EVENT`, `CTRL_CLOSE_EVENT`).
-  * In-flight staging directories (`.ombracrypt_stage_*`) and incomplete `.part` files undergo atomic staging rollback and directory removal before process exit. Uncatchable interruptions (`SIGKILL`, sudden power failure) are safely recovered at any time via `ombracrypt clean`.
-* **Interactive Duress Response:** Entering a secondary deception passcode during decryption triggers an in-place CSPRNG overwrite against the target `.obk` key file on disk (enforcing `st_nlink > 1` protection) and returns a generic authentication failure, rendering the private key unrecoverable. On solid-state media with hardware wear-leveling, this provides an immediate application-level cryptographic overwrite.
-* **Defensive Filesystem Architecture:** Pre-flight storage telemetry via `fs2`, collision-proof atomic publication (`atomic_publish_noreplace` and `atomic_publish_dir_noreplace`), advisory sentinel file locks (`.active.lock`), and defensive TAR parsing limits (zip-slip sanitization, anti-symlink traversal, recursion depth ceilings $\le 64$).
-* **Scriptable & CI-Ready:** Supports both interactive masked terminal prompts (`inquire`) and non-interactive inputs (`--password-env`, `--password-file`, or standard input pipe), strictly preserving all intentional passphrase whitespace while stripping only line terminators (`\r`, `\n`).
-* **Memory Zeroization:** All plaintext buffers, intermediate decapsulation keys, and credential strings are encapsulated in `zeroize::Zeroizing` wrappers and wiped immediately upon drop.
+  * `.obv` **(Encrypted Vault):** Authenticated ciphertext stream bound to serialized header metadata via SHA-256 Additional Authenticated Data (AAD).
+  * `.obk` **(Private Decapsulation Key):** Offline decapsulation key created with `0600` owner-only permissions on POSIX filesystems (Linux/macOS) that honor Unix mode bits. On Windows, file creation currently inherits parent directory ACLs, and removable filesystems such as `FAT32`/`exFAT` do not support permission bits or ACLs; store `.obk` files only in private user-owned directories or physically controlled offline media.
+    * **X-Wing profile:** Exactly **86 bytes** (5 B magic + 1 B `kem_id` + 16 B salt + 32 B seed + 32 B phantom block).
+    * **Cypherpunk profile:** Exactly **3,254 bytes** (5 B magic + 1 B `kem_id` + 16 B salt + 3,168 B ML-KEM-1024 d<sub>k</sub> + 32 B X25519 s<sub>k</sub> + 32 B phantom block).
+  * `.obp` **(Public Sealing Key):** Reusable public key allowing one-way vault encryption for individual or group recipients without granting decryption rights (**1,222 bytes** for `xwing`, **1,606 bytes** for `cypherpunk`).
+* **Cooperative Cancellation & Best-Effort Rollback:** Intercepts `Ctrl+C` (`SIGINT` on Unix, `CTRL_C_EVENT` on Windows) non-blockingly via `ctrlc` and an atomic cancellation barrier.
+  * When cancelled, the pipeline halts at the next cancellation boundary and attempts best-effort rollback of in-flight staging artifacts (`.ombracrypt_stage_*` / `.ombracrypt_part_*.part`). If OS file locks or permission errors prevent complete removal, the CLI surfaces an incomplete-cleanup warning rather than claiming cleanup succeeded.
+  * Signals not intercepted by the CLI handler (`SIGTERM`, `SIGHUP`, `SIGKILL`) or sudden power failures can leave partial staging remnants that can be inspected and reclaimed via `ombracrypt clean`.
+* **Interactive Duress Response:** Entering a secondary deception passcode during decryption triggers an in-place CSPRNG overwrite attempt against the target `.obk` file on disk (rejecting symlinks and, on Unix, targets with `st_nlink > 1`) and returns a generic authentication failure message. Previously copied `.obk` backups, SSD controller wear-leveling, snapshots, and copy-on-write filesystems remain outside this protection.
+* **Defensive Filesystem Architecture & Scoped Staging Hygiene:** Pre-flight storage telemetry via `fs2`, collision-proof atomic publication (`atomic_publish_noreplace` and `atomic_publish_dir_noreplace`), advisory sentinel locks (`.active.lock`), defensive TAR parsing limits (zip-slip sanitization, non-regular entry rejection, recursion depth ceilings <= 64), and on-demand staging cleanup via `ombracrypt clean`.
+* **Scriptable & Automation-Ready:** Supports both interactive masked terminal prompts (`inquire`) and non-interactive credential inputs (`--password-env`, `--password-file`, or standard input pipe), preserving intentional passphrase whitespace while stripping only trailing line terminators (`\r`, `\n`).
+* **Designated Buffer Zeroization:** Designated plaintext buffers, intermediate decapsulation keys, and credential strings are wrapped in `zeroize::Zeroizing` containers and wiped upon drop. Software zeroization does not protect against OS memory paging, crash dumps, or physical RAM imaging.
 
 ---
 
 ## Download & Installation
 
-Pre-compiled standalone binaries are available from [GitHub Releases](https://github.com/ABiswasDev/ombracrypt-cli/releases):
+Pre-compiled standalone CLI binaries (`cli-v*` tags) with SHA-256 checksums are published on [GitHub Releases](https://github.com/ABiswasDev/Ombracrypt/releases):
 
-| Platform | Architecture | Binary Package |
+| Platform | Architecture | Binary Archive & Checksum (`cli-v2.1.0` example) |
 | :--- | :--- | :--- |
-| **Linux** | x86_64 | `ombracrypt-v2.0.0-linux-x64.tar.gz` |
-| **macOS** | Apple Silicon (aarch64) | `ombracrypt-v2.0.0-macos-arm64.tar.gz` |
-| **macOS** | Intel (x86_64) | `ombracrypt-v2.0.0-macos-x64.tar.gz` |
-| **Windows** | x86_64 | `ombracrypt-v2.0.0-windows-x64.zip` |
+| **Linux** | `x86_64-unknown-linux-gnu` | `ombracrypt-cli-v2.1.0-linux-x86_64.tar.gz` (+ `.sha256`) |
+| **macOS** | Apple Silicon (`aarch64-apple-darwin`) | `ombracrypt-cli-v2.1.0-macos-aarch64.tar.gz` (+ `.sha256`) |
+| **macOS** | Intel (`x86_64-apple-darwin`) | `ombracrypt-cli-v2.1.0-macos-x86_64.tar.gz` (+ `.sha256`) |
+| **Windows** | `x86_64-pc-windows-msvc` | `ombracrypt-cli-v2.1.0-windows-x86_64.zip` (+ `.sha256`) |
 
 ### Linux & macOS Quick Setup
 
 ```bash
+# Verify archive integrity (Linux: sha256sum; macOS: shasum -a 256)
+sha256sum -c ombracrypt-cli-v2.1.0-linux-x86_64.tar.gz.sha256
+
 # Extract the binary
-tar -xvf ombracrypt-v2.0.0-linux-x64.tar.gz
+tar -xzf ombracrypt-cli-v2.1.0-linux-x86_64.tar.gz
 
 # Make executable and install to system PATH
 chmod +x ombracrypt
 sudo mv ombracrypt /usr/local/bin/
 
-# Verify installation
+# Verify installation (displays CLI version, core version, and OMBV02 format)
 ombracrypt --version
 ```
 
 ### Windows Quick Setup
-Extract `ombracrypt.exe` from the zip archive and place it in your `PATH` or invoke it directly:
+
+Verify the downloaded `.zip` archive against its `.sha256` file, extract `ombracrypt.exe`, and place it in your `PATH` or invoke it directly:
+
 ```powershell
+Get-FileHash -Algorithm SHA256 .\ombracrypt-cli-v2.1.0-windows-x86_64.zip
+Get-Content .\ombracrypt-cli-v2.1.0-windows-x86_64.zip.sha256
 .\ombracrypt.exe --version
 ```
+
+For step-by-step usage walkthroughs and troubleshooting, see the [CLI Quickstart Guide](https://github.com/ABiswasDev/Ombracrypt/blob/main/apps/cli/docs/QUICKSTART.md).
 
 ---
 
@@ -141,7 +148,7 @@ ombracrypt encrypt \
 
 ### 2. `decrypt` (Unlock Vault)
 
-Authenticates and extracts an `.obv` vault directly in memory using the corresponding `.obk` Private Key and Master Password.
+Authenticates and extracts an `.obv` vault using the corresponding `.obk` Private Key and Master Password. Decrypted output is staged in an isolated same-filesystem directory before atomic no-clobber publication.
 
 ```bash
 # Interactive decryption
@@ -201,9 +208,9 @@ ombracrypt inspect --mode encrypt --target "/data/vault_dir" --output-dir "/back
 
 ---
 
-### 5. `clean` (Staging Cleanup)
+### 5. `clean` (Staging Hygiene & Cleanup)
 
-Scans target directories for interrupted or orphaned `.ombracrypt_stage_*` temporary staging remnants and reclaims disk space. Accepts directory and file paths with automatic parent resolution, canonicalization, and deduplication.
+Scans target directories for interrupted or orphaned `.ombracrypt_stage_*` temporary staging remnants and reclaims disk space. Accepts directory and file paths with automatic parent resolution, canonicalization, and deduplication. Active locked operations and symlinks are skipped, and any inspection or removal failures are reported explicitly rather than silently ignored.
 
 ```bash
 # Clean current directory
@@ -217,9 +224,10 @@ ombracrypt clean -d "/backups" -d "/mnt/coldstorage" -d "/var/data"
 
 ## Headless Automation & CI Scripting
 
-For unattended automation, shell scripts, or CI/CD pipelines, credentials can be piped via standard input or supplied via environment variables without interactive prompts. Leading and trailing passphrase whitespace is strictly preserved (only line endings are stripped):
+For unattended automation, shell scripts, or CI/CD pipelines, credentials can be piped via standard input or supplied via environment variables without interactive prompts. Leading and trailing passphrase whitespace is preserved (only line endings are stripped):
 
 ### Example: Automated Backup Script
+
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
@@ -236,6 +244,7 @@ echo "Quantum backup published successfully."
 ```
 
 ### Example: Sealing via Standard Input Pipe
+
 ```bash
 echo -n "MyMasterPassword" | ombracrypt encrypt \
   --target "/opt/database_dump_dir" \
@@ -250,60 +259,73 @@ echo -n "MyMasterPassword" | ombracrypt encrypt \
 
 | Extension | Artifact Role | Internal Structure & Format |
 | :--- | :--- | :--- |
-| **`.obv`** | Encrypted Vault | Magic bytes `OMBV\x02`, cipher ID, KEM ID, Argon2id parameters ($64\text{ MiB}$, $3\text{ passes}$, $4\text{ lanes}$), salt, nonce, KEM ciphertext payload, and $1\text{ MiB}$ chunked AEAD ciphertext blocks with authenticated end-of-stream tags. |
-| **`.obk`** | Private Decapsulation Key | Magic bytes `OBSK\x02`, profile ID, duress salt ($16\text{ B}$), private KEM material, static X25519 private key, and $32\text{-byte}$ phantom duress block. Exactly **86 bytes** for X-Wing (`xwing`) and **3,254 bytes** for Cypherpunk (`cypherpunk`). Restricted to `0600` permissions. |
+| **`.obv`** | Encrypted Vault | Magic bytes `OMBV\x02`, cipher ID, KEM ID, Argon2id parameters (64 MiB, 3 passes, 4 lanes), salt, nonce, KEM ciphertext payload, and up to 1 MiB chunked AEAD ciphertext blocks with header-bound AAD and authenticated end-of-stream framing. |
+| **`.obk`** | Private Decapsulation Key | Magic bytes `OBSK\x02`, profile ID, duress salt (16 B), private KEM material, static X25519 private key, and 32-byte phantom duress block. Exactly **86 bytes** for X-Wing (`xwing`) and **3,254 bytes** for Cypherpunk (`cypherpunk`). Created with `0600` permissions on POSIX filesystems; inherits parent directory ACLs on Windows. |
 | **`.obp`** | Public Sealing Key | Magic bytes `OBPK\x02`, profile ID, ML-KEM public encapsulation key, and static X25519 public key. Exactly **1,222 bytes** for X-Wing and **1,606 bytes** for Cypherpunk. |
 
 ---
 
 ## Building from Source
 
-Ombracrypt CLI has no web frontend or desktop dependencies. It builds with standard Rust tooling:
+The CLI package (`ombracrypt-cli`) has no web frontend or Tauri desktop dependencies and builds directly from the unified `Ombracrypt` Cargo workspace with standard Rust tooling:
 
 ```bash
-# Clone the repository
-git clone https://github.com/ABiswasDev/ombracrypt-cli.git
-cd ombracrypt-cli
+# Clone the unified workspace repository
+git clone https://github.com/ABiswasDev/Ombracrypt.git
+cd Ombracrypt
 
-# Run compilation check
-cargo check --all-targets
+# Verify CLI compilation
+cargo check -p ombracrypt-cli --all-targets
 
-# Run the 60-test security and regression conformance suite (61 on Windows)
-cargo test --release -- --nocapture
+# Run core security, KAT, and CLI interoperability test suites
+cargo test -p ombracrypt-core -p ombracrypt-cli --release -- --nocapture
 
-# Compile the release binary
-cargo build --release
+# Compile the locked release binary
+cargo build --release --locked -p ombracrypt-cli
 ```
 
-The optimized executable is output to `target/release/ombracrypt`.
+The compiled executable is output to `target/release/ombracrypt` (`target\release\ombracrypt.exe` on Windows).
 
 ---
 
-## Project Structure
+## Workspace Layout (CLI & Shared Core)
 
 ```plaintext
-ombracrypt-cli/
-├── Cargo.toml                # Zero-Tauri Rust configuration (fips203, x25519-dalek, fs2, libc)
-├── LICENSE                   # Cryptographic Autonomy License 1.0 (CAL-1.0)
-├── README.md                 # Technical documentation and CLI manual
+Ombracrypt/
+├── Cargo.toml                           # Root Cargo workspace manifest
+├── Cargo.lock                           # Unified workspace dependency lockfile
+├── LICENSE                              # Cryptographic Autonomy License 1.0 (CAL-1.0)
+├── SECURITY.md                          # Security policy & local filesystem trust boundaries
 ├── .github/
 │   └── workflows/
-│       ├── ci.yml            # Multi-OS test & conformance matrix (Linux, macOS, Windows)
-│       └── release.yml       # Automated cross-platform release pipeline with SHA-256 checksums
-├── docs/
-│   └── QUICKSTART.md         # Operational and troubleshooting guide
-├── tests/
-│   ├── fixtures/             # Independent specification reference vectors (KAT) & Desktop v2
-│   └── interop_tests.rs      # Cross-application interoperability test suite
-└── src/
-    ├── lib.rs                # Library module exports
-    ├── main.rs               # Clap CLI definitions, subcommand routers, and progress bars
-    ├── crypto.rs             # FIPS 203 ML-KEM, X-Wing combiner, Argon2id KDF, zeroization
-    ├── stream.rs             # In-memory chunked AEAD streaming engine and header authentication
-    ├── fs_guard.rs           # Atomic publication, advisory sentinel locks, path traversal defense
-    ├── deception.rs          # Duress trapdoor protocol and CSPRNG .obk overwrite engine
-    ├── pipeline.rs           # On-the-fly streaming encryption/decryption workflows
-    └── tests.rs              # Unit, regression, and KAT cryptographic tests
+│       ├── ci.yml                       # Multi-OS workspace security & interop test matrix
+│       └── release-cli.yml              # Standalone CLI release pipeline (cli-v* tags + SHA-256)
+├── apps/
+│   └── cli/
+│       ├── Cargo.toml                   # CLI crate manifest (links ombracrypt-core)
+│       ├── README.md                    # Technical documentation and CLI manual (bundled in releases)
+│       ├── docs/
+│       │   └── QUICKSTART.md            # CLI operational and troubleshooting guide
+│       ├── src/
+│       │   └── main.rs                  # Clap CLI definitions, prompts, signal handler & progress bars
+│       └── tests/
+│           ├── fixtures/
+│           │   └── desktop_v2/          # Frozen v2.1.0 golden compatibility fixtures (OMBV02)
+│           └── interop_tests.rs         # Shared-core & frozen fixture interoperability tests
+└── crates/
+    └── ombracrypt-core/                 # Canonical Post-Quantum Cryptographic & FS Engine
+        ├── Cargo.toml                   # Core crate manifest (fips203, x25519-dalek, argon2, fs2)
+        ├── tests/
+        │   └── fixtures/
+        │       └── xwing_revision11/    # CIRCL v1.6.5 Known-Answer Test fixtures
+        └── src/
+            ├── lib.rs                   # Public engine API, CORE_VERSION & zeroizing wrappers
+            ├── crypto.rs                # FIPS 203 ML-KEM, X-Wing combiner, Argon2id KDF
+            ├── stream.rs                # In-memory chunked AEAD streaming engine & TAR guards
+            ├── fs_guard/                # Platform-native atomic publication & sentinel locks
+            ├── deception.rs             # Duress trapdoor protocol & CSPRNG .obk overwrite
+            ├── pipeline.rs              # Streaming encryption/decryption controllers
+            └── tests.rs                 # Core unit, concurrency, and KAT test suite
 ```
 
 ---
@@ -311,17 +333,19 @@ ombracrypt-cli/
 ## Security Invariants & Threat Model
 
 * **In Scope:**
-  * Quantum cryptanalysis resistance (NIST FIPS 203 ML-KEM + Classical RFC 7748 X25519).
+  * Post-quantum data confidentiality (NIST FIPS 203 ML-KEM + Classical RFC 7748 X25519).
   * Defense against "Harvest Now, Decrypt Later" (HNDL) adversary collection.
-  * In-transit ciphertext manipulation, chunk reordering, and truncation detection (per-chunk counter framing & AAD header binding).
-  * Interactive duress response (Plausible Deniability via `.obk` CSPRNG destruction).
-  * Protection against Zip-Slip, path traversal, symlink attacks, and malicious TAR entry injection.
-* **Out of Scope:**
-  * Compromised host kernels, hardware keyloggers, or malicious hypervisors.
+  * Ciphertext manipulation, chunk reordering, header tampering, and truncation detection (per-chunk counter framing & header-bound AAD).
+  * Interactive duress response (in-place CSPRNG overwrite attempt against the targeted local `.obk` file).
+  * Protection against Zip-Slip, path traversal, non-regular TAR entries, and archive bomb limits during extraction.
+* **Out of Scope & Operational Boundaries:**
+  * Compromised host kernels, active memory scrapers, hardware keyloggers, or malicious hypervisors.
+  * Untrusted or world-writable multi-user shared directories for vault extraction, `.obk` key storage, or staging cleanup.
+  * Flash storage wear-leveling residue, filesystem snapshots, or previously copied `.obk` backups during duress overwrite.
 * **Zero Recovery Escrow:**
   * Ombracrypt maintains no administrative backdoor or key-escrow service. Loss of the `.obk` private key or Master Password results in irreversible data loss.
 
-For detailed cryptographic proofs and calculations, consult the [Ombracrypt Cryptographic Specification](https://github.com/ABiswasDev/Ombracrypt/blob/main/docs/CRYPTOGRAPHY.md).
+For full cryptographic specifications and local filesystem trust boundaries, consult the [Cryptographic Specification](https://github.com/ABiswasDev/Ombracrypt/blob/main/README.md#cryptographic-specification--architecture) and the [Security Policy](https://github.com/ABiswasDev/Ombracrypt/blob/main/SECURITY.md).
 
 ---
 
@@ -338,4 +362,4 @@ Copyright © 2026 Abhishek Biswas (Ombraveil). All rights reserved.
 
 ## License
 
-This project is licensed under the **Cryptographic Autonomy License 1.0 (CAL-1.0)**. See [LICENSE](LICENSE) for details.
+This project is licensed under the **Cryptographic Autonomy License 1.0 (CAL-1.0)**. See [LICENSE](https://github.com/ABiswasDev/Ombracrypt/blob/main/LICENSE) for details.
