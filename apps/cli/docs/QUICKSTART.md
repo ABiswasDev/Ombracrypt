@@ -339,7 +339,7 @@ The optional **Duress Trapdoor** provides an interactive coercion countermeasure
 
 ### How It Works
 
-1. **Configuration:** When encrypting with fresh keys or running `keygen`, set a secondary **Deception Passcode** distinct from your Master Password.
+1. **Configuration:** When encrypting a vault with fresh keys (`ombracrypt encrypt` without `--public-key`), set a secondary **Deception Passcode** distinct from your Master Password. *(Standalone `keygen` intentionally omits the Duress Trapdoor—writing 32 bytes of CSPRNG noise instead, matching Ombracrypt Desktop—to prevent cross-vault passphrase collisions when senders seal against a shared `.obp` key.)
 2. **Duress Input:** If compelled to unlock a vault (`Financials.obv`), enter your **Deception Passcode** at the password prompt.
 3. **In-Place Overwrite Attempt:**
    * The engine verifies the deception passcode in constant time against the 32-byte phantom block in the `.obk` file.

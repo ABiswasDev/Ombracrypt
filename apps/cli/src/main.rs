@@ -168,14 +168,6 @@ enum Commands {
         #[arg(short = 'm', long, value_enum, default_value_t = KemChoice::XWing)]
         kem: KemChoice,
 
-        /// Path to a file containing the Deception Passcode
-        #[arg(long)]
-        deception_passcode_file: Option<PathBuf>,
-
-        /// Name of the environment variable containing the Deception Passcode
-        #[arg(long)]
-        deception_passcode_env: Option<String>,
-
         /// Suppress interactive banners
         #[arg(short, long)]
         quiet: bool,
@@ -597,8 +589,6 @@ fn run() -> Result<(), String> {
             name,
             output_dir,
             kem,
-            deception_passcode_file,
-            deception_passcode_env,
             quiet,
         } => {
             print_banner("KEYGEN (Generate Reusable Keypair)", &name, quiet);
@@ -606,21 +596,11 @@ fn run() -> Result<(), String> {
             let out_dir = output_dir.unwrap_or_else(|| PathBuf::from("."));
             let out_dir_str = out_dir.to_string_lossy().to_string();
 
-            let deception_passcode = fetch_credential(
-                "Enter Deception Passcode for Duress Trapdoor (Press ENTER to skip):",
-                Some("Confirm Deception Passcode:"),
-                deception_passcode_file.as_deref(),
-                deception_passcode_env.as_deref(),
-                "OMBRACRYPT_DECEPTION_PASSCODE",
-                true,
-            )?;
-
-            let msg = pipeline::generate_standalone_keypair(
-                &out_dir_str,
-                &name,
-                &kem.to_string(),
-                &deception_passcode,
-            )?;
+            // Standalone reusable keypairs intentionally omit the Duress Trapdoor (passing "")
+            // so ombracrypt-core writes 32 bytes of CSPRNG noise, matching Desktop GUI behavior
+            // and preventing cross-vault passphrase collisions when sealing against shared .obp keys.
+            let msg =
+                pipeline::generate_standalone_keypair(&out_dir_str, &name, &kem.to_string(), "")?;
             println!("\n{} {}\n", "✔".green(), msg.bold().green());
             Ok(())
         }

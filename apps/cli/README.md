@@ -175,7 +175,7 @@ ombracrypt decrypt \
 
 ### 3. `keygen` (Generate Standalone Keypairs)
 
-Generates standalone reusable keypairs (`.obp` Public Key + `.obk` Private Key with optional Duress Trapdoor).
+Generates standalone reusable keypairs (`.obp` Public Key + `.obk` Private Key). Standalone keypairs intentionally omit the Duress Trapdoor—writing 32 bytes of CSPRNG noise instead, matching Ombracrypt Desktop—to prevent cross-vault passphrase collisions when senders seal vaults against a shared `.obp` key.
 
 ```bash
 # Generate X-Wing keypair (bob.obp + bob.obk)
@@ -189,8 +189,7 @@ ombracrypt keygen --name "carol" --output-dir "/keys" --kem cypherpunk
 * `-n, --name <NAME>`: Base filename stem for the keypair. *(Required)*
 * `-o, --output-dir <DIR>`: Destination directory. *(Defaults to current directory)*
 * `-m, --kem <PROFILE>`: `xwing` *(default)* or `cypherpunk`.
-* `--deception-passcode-file <FILE>`: Optional duress passcode from file.
-* `--deception-passcode-env <VAR>`: Optional duress passcode from environment variable.
+* `-q, --quiet`: Suppress interactive banners.
 
 ---
 

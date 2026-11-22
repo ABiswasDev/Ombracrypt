@@ -165,9 +165,31 @@ fn test_cli_keygen_public_sealing_inspect_and_clean_commands() {
     for d in [&keys_dir, &src_dir, &vault_dir, &out_dir] {
         fs::create_dir_all(d).unwrap();
     }
-    fs::write(src_dir.join("contract.txt"), b"Zero-escrow public key sealing").unwrap();
+    fs::write(
+        src_dir.join("contract.txt"),
+        b"Zero-escrow public key sealing",
+    )
+    .unwrap();
 
-    // 1. Keygen
+    // 0. Standalone keygen must reject duress CLI flags (GUI/CLI parity)
+    let bad_kg = Command::new(bin)
+        .args([
+            "keygen",
+            "--name",
+            "rejected",
+            "--output-dir",
+            keys_dir.to_str().unwrap(),
+            "--deception-passcode-env",
+            "OMBRACRYPT_DECEPTION_PASSCODE",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !bad_kg.status.success(),
+        "Standalone keygen must not accept --deception-passcode-env"
+    );
+
+    // 1. Keygen (must ignore OMBRACRYPT_DECEPTION_PASSCODE so matching vault passwords never trigger duress)
     let kg_out = Command::new(bin)
         .args([
             "keygen",
@@ -179,7 +201,7 @@ fn test_cli_keygen_public_sealing_inspect_and_clean_commands() {
             "xwing",
             "--quiet",
         ])
-        .env("OMBRACRYPT_DECEPTION_PASSCODE", "")
+        .env("OMBRACRYPT_DECEPTION_PASSCODE", "SealSecret99!")
         .output()
         .unwrap();
     assert!(kg_out.status.success());
@@ -225,7 +247,7 @@ fn test_cli_keygen_public_sealing_inspect_and_clean_commands() {
         .unwrap();
     assert!(seal_out.status.success());
 
-    // 4. Decrypt with .obk
+    // 4. Decrypt with .obk using the exact same string that was in OMBRACRYPT_DECEPTION_PASSCODE
     let dec_out = Command::new(bin)
         .args([
             "decrypt",
@@ -248,7 +270,12 @@ fn test_cli_keygen_public_sealing_inspect_and_clean_commands() {
 
     // 5. Clean command
     let clean_out = Command::new(bin)
-        .args(["clean", "--target-dir", out_dir.to_str().unwrap(), "--quiet"])
+        .args([
+            "clean",
+            "--target-dir",
+            out_dir.to_str().unwrap(),
+            "--quiet",
+        ])
         .output()
         .unwrap();
     assert!(clean_out.status.success());
