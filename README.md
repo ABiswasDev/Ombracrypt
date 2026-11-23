@@ -35,6 +35,11 @@ Ombracrypt is a local-first, zero-escrow post-quantum cryptographic vault engine
 | **CLI** | `v2` | **Unified into the `Ombracrypt` workspace (`apps/cli`).** Standalone cross-platform terminal binaries sharing `crates/ombracrypt-core` are available under GitHub Releases, superseding the standalone `Ombracrypt-CLI` repository. |
 
 ---
+## Walkthrough & Demo
+
+https://github.com/user-attachments/assets/7f7c2d61-a1b9-435a-bde6-3a4a61f02c47
+
+---
 
 ## Architectural Principles
 
