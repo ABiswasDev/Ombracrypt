@@ -438,7 +438,7 @@ ombracrypt/
 ## Author & Maintainer
 
 * **Abhishek Biswas** – *Lead Architect & Maintainer* – [@ABiswasDev](https://github.com/ABiswasDev)
-
+* **Archival Record (Zenodo):** [DOI 10.5281/zenodo.24519896](https://zenodo.org/records/24519896)
 ---
 
 ## License & Legal Terms

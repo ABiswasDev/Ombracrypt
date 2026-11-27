@@ -2,11 +2,12 @@
 
 ## Supported Versions
 
-Ombracrypt is currently transitioning from legacy classical builds to post-quantum hybrid architectures. Security audits, vulnerability triaging, and active patches are prioritized for the **v2.1.0-beta** release track and the `main` development branch.
+Security audits, vulnerability triaging, and active patches are prioritized for the **v2.1.x** stable release track (Desktop `v2.1.0` and CLI `cli-v2.1.0`) and the `main` development branch.
 
 | Version | Status | Supported | Notes |
 | :--- | :--- | :--- | :--- |
-| **`v2.1.0-beta`** | Current Beta | ✅ | Primary focus for active security testing, audits, and fixes. |
+| **`v2.1.x`** | Current Stable | ✅ | Desktop (`v2.1.0`) and CLI (`cli-v2.1.0`). Primary focus for active security fixes and maintenance. |
+| **`v2.x-beta`** | Pre-release | ❌ | Superseded by `v2.1.0` stable; upgrade recommended. |
 | **`v1.0.x`** | Legacy | ⚠️ | Critical security fixes only (deprecated architecture). |
 
 ## Reporting a Vulnerability
