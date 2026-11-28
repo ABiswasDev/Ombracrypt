@@ -10,6 +10,14 @@ Security audits, vulnerability triaging, and active patches are prioritized for 
 | **`v2.x-beta`** | Pre-release | ❌ | Superseded by `v2.1.0` stable; upgrade recommended. |
 | **`v1.0.x`** | Legacy | ⚠️ | Critical security fixes only (deprecated architecture). |
 
+## Official Distribution & Third-Party Wrappers
+
+Ombracrypt is designed and distributed strictly as offline, local software. There is **no official web version, browser-based emulator, or cloud-hosted deployment**.
+
+* **Official Sources Only:** Obtain prebuilt Desktop and CLI binaries exclusively from [GitHub Releases](https://github.com/ABiswasDev/Ombracrypt/releases) or compile directly from the official source repository.
+* **Checksum Verification:** Always verify published `.sha256` checksums before installing or executing downloaded archives.
+* **Third-Party Emulators & Unofficial Portals Out of Scope:** Running Ombracrypt inside third-party remote workstations, browser emulators, or unofficial repackaged download portals exposes plaintext files, Master Passwords, and `.obk` private keys to external servers and breaks the local-first threat model. Such third-party services are unaffiliated with Ombracrypt and fall outside our security scope.
+
 ## Reporting a Vulnerability
 
 As an offline-first cryptographic vault designed for hybrid post-quantum confidentiality, Ombracrypt takes implementation correctness, memory safety, and cryptographic integrity seriously.

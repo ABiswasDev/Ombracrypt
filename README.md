@@ -84,6 +84,8 @@ Standalone headless CLI binaries (`cli-v*` tags) with SHA-256 checksums are also
 
 For setup instructions and usage workflows, refer to the [Desktop Quickstart Guide](docs/QUICKSTART.md), the [CLI Manual](apps/cli/README.md), and the [CLI Quickstart Guide](apps/cli/docs/QUICKSTART.md).
 
+> **⚠️ Official Distribution Notice:** Ombracrypt is strictly offline, local software with **no official web application, browser emulator, or cloud-hosted service**. Download binaries exclusively from [GitHub Releases](https://github.com/ABiswasDev/Ombracrypt/releases) (or build directly from source) and verify published `.sha256` checksums before use. Do not run Ombracrypt or enter `.obk` private keys or vault passwords on third-party download portals or online emulator websites using the Ombracrypt name.
+
 ### The Three Vault Artifacts
 
 ```text
